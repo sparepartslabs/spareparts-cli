@@ -1,0 +1,46 @@
+name: Dependency scan
+
+# Known-vulnerable dependencies, checked against the Python Packaging Advisory
+# Database and OSV by pip-audit (https://pypi.org/project/pip-audit/).
+#
+# Self-contained, like the secret scan: no shared workflow, no GitHub Advanced
+# Security. Dependabot (see .github/dependabot.yml) opens the upgrade PRs; this
+# job is what fails a build that ships a vulnerable dependency in the meantime.
+#
+# The schedule matters more than the PR trigger. A dependency does not become
+# vulnerable when someone edits pyproject.toml; it becomes vulnerable when an
+# advisory is published, which can be months after the last commit here.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # `all`, not the bare install: the extras are dependencies this project
+      # tells people to install, so an advisory against one of them is ours.
+      - name: Install every declared dependency
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[all]' pip-audit
+
+      - name: Audit
+        # --skip-editable skips this project itself, which has no PyPI release
+        # to look up. Everything it pulled in is still audited, and the summary
+        # pip-audit prints lists exactly what was skipped and why.
+        run: pip-audit --skip-editable

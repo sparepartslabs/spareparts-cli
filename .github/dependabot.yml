@@ -1,0 +1,31 @@
+version: 2
+
+# The upgrade half of dependency scanning. `dependency-scan.yml` fails a build
+# that is already vulnerable; this opens the pull request that fixes it.
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+    groups:
+      # One PR for the whole set. Three vendor SDKs on separate weekly PRs is
+      # how a repository trains its owner to stop reading them.
+      python:
+        patterns: ["*"]
+
+  # Workflow actions pin to major tags that move, so this mostly catches
+  # deprecations (a runner dropping node16 actions, say) before they break CI.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+    groups:
+      actions:
+        patterns: ["*"]

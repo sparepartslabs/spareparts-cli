@@ -1,0 +1,92 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pytest:
+    # What the check reads as on a PR: "Tests / pytest on Python 3.11". The
+    # default would be `pytest (3.11)`, a bare number next to two others.
+    name: pytest on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor pyproject declares, through the current release. `sp` is
+        # installed onto whatever interpreter a contributor already has, so the
+        # supported range is a promise rather than an aspiration.
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: pip install -e '.[dev]'
+
+      - name: Run tests
+        run: pytest -q
+
+  # A bare `pip install spareparts-cli` pulls Anthropic and nothing else, which
+  # is the install most people get. If an OpenAI or Gemini import ever leaks out
+  # of its adapter and into a shared path, it surfaces here as a crash on
+  # `--help` rather than in a stranger's terminal.
+  bare-install:
+    name: bare install runs with no provider extras
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install without provider extras
+        run: pip install .
+
+      - name: The CLI must run with only the default vendor installed
+        run: |
+          if python -c "import openai" 2>/dev/null; then
+            echo "openai is installed; this job is not testing what it claims"
+            exit 1
+          fi
+          sp --help
+          sp lgtm --help
+
+  build:
+    name: build the wheel and check its contents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        run: |
+          pip install build
+          python -m build
+
+      - name: Check the distribution
+        run: |
+          pip install twine
+          twine check dist/*
+
+      # The prompt files are data, not code, and a packaging change that drops
+      # them leaves a CLI that imports fine and then cannot generate anything.
+      - name: The wheel must carry the prompt files
+        run: |
+          python - <<'PY'
+          import pathlib, zipfile
+          wheel = next(iter(sorted(pathlib.Path("dist").glob("*.whl"))))
+          names = zipfile.ZipFile(wheel).namelist()
+          prompts = [n for n in names if "/prompts/" in n and n.endswith(".json")]
+          assert prompts, f"no prompt JSON in {wheel.name}: {names}"
+          print("\n".join(prompts))
+          PY
