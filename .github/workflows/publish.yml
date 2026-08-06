@@ -8,6 +8,16 @@ on:
   push:
     tags:
       - "v*" # e.g. v0.1.0
+  # The same release, re-run by hand. A tag push is the normal path, and it is
+  # not always enough on its own: a tag pushed while Actions is down never
+  # queues a run, and re-pushing the tag to provoke one is a poor tool for a
+  # release. Naming the tag here runs the same jobs against the same commit.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release, e.g. v0.1.0"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -18,7 +28,13 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     steps:
+      # `inputs.tag` on a manual run, the pushed tag otherwise. Checking the tag
+      # out explicitly matters on the manual path: the workflow file comes from
+      # whichever branch was selected, and what gets built has to come from the
+      # tag rather than from that branch's head.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - uses: actions/setup-python@v5
         with:
@@ -28,10 +44,12 @@ jobs:
       # for, under a name that already means something else. Cheaper to fail
       # here than to yank a release: PyPI will not let the number be reused.
       - name: The tag must match the version in pyproject
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           python - <<'PY'
           import os, sys, tomllib
-          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          tag = os.environ["TAG"].removeprefix("v")
           with open("pyproject.toml", "rb") as f:
               declared = tomllib.load(f)["project"]["version"]
           if tag != declared:
@@ -66,6 +84,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.tag || github.ref_name }}
           # Notes are generated from what changed since the previous tag, which
           # a shallow clone cannot see.
           fetch-depth: 0
@@ -76,7 +95,10 @@ jobs:
       #
       # The sdist and wheel are deliberately not attached: PyPI already serves
       # them, and a second copy is one more thing that can disagree.
+      # `--verify-tag` so a typo in the manual input fails here rather than
+      # creating a release for a tag that does not exist.
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: gh release create "$TAG" --generate-notes --verify-tag

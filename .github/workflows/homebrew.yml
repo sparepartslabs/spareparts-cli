@@ -8,6 +8,17 @@ on:
   push:
     tags:
       - "v*"
+  # Re-runnable on its own, which is the point. This job is the half of a
+  # release that can fail after PyPI has already accepted the version: a
+  # missing tap token, a formula conflict, Actions being down when the tag
+  # landed. It reads the sdist from PyPI, so re-running it needs no new tag
+  # and no version bump.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Released tag to point the formula at, e.g. v0.1.0"
+        required: true
+        type: string
 
 jobs:
   bump:
@@ -15,7 +26,9 @@ jobs:
     steps:
       - name: Resolve version
         id: v
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Fetch sdist url + sha256 from PyPI (wait for publish)
         id: pypi
