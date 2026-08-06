@@ -53,20 +53,36 @@ def _find_hunk(files: list[FileDiff], path: str, header: str) -> str | None:
     return None
 
 
+#: Lines of hunk `?` will print before it stops and points at the file instead.
+#: A hunk is usually a dozen lines, but a new or renamed file arrives as one
+#: `@@ -0,0 +1,657 @@`, and scrolling 657 lines past someone is not showing
+#: them anything.
+MAX_HUNK_LINES = 40
+
+
 def _print_hunk(files: list[FileDiff], path: str, header: str, style: Styler) -> None:
     body = _find_hunk(files, path, header)
     if body is None:
         print(style(_DIM, f"  (couldn't re-find {path} {header})"))
         return
+
+    lines = body.split("\n")
+    clipped = len(lines) - MAX_HUNK_LINES
+
     print()
     print(style(_BOLD, f"  {path}"))
-    for line in body.split("\n"):
+    for line in lines[:MAX_HUNK_LINES]:
         if line.startswith("+"):
             print("  " + style(_GREEN, line))
         elif line.startswith("-"):
             print("  " + style(_RED, line))
         else:
             print("  " + style(_DIM, line))
+    if clipped > 0:
+        # The file is checked out — say where to look rather than pretending
+        # the terminal is a good place to read 600 lines.
+        print()
+        print(style(_DIM, f"  … {clipped} more lines. Open {path} to read the rest."))
     print()
 
 

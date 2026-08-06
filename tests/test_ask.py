@@ -106,3 +106,36 @@ def test_the_revisit_note_points_at_the_file(answers, capsys):
     answers("b", "a")
     run_quiz(quiz(1), files(), PLAIN)
     assert "src/charge.ts" in capsys.readouterr().out
+
+
+def test_a_huge_hunk_is_clipped_and_points_at_the_file(answers, capsys):
+    # A new or renamed file arrives as a single `@@ -0,0 +1,657 @@` hunk.
+    big = "diff --git a/src/handlers.ts b/src/handlers.ts\n"
+    big += "--- /dev/null\n+++ b/src/handlers.ts\n"
+    big += "@@ -0,0 +1,200 @@\n"
+    big += "\n".join(f"+line {i}" for i in range(200)) + "\n"
+
+    q = Quiz(
+        questions=[
+            Question(
+                prompt="Q",
+                options=["first", "second", "third"],
+                file="src/handlers.ts",
+                hunk="@@ -0,0 +1,200 @@",
+            )
+        ],
+        correct=[0],
+    )
+
+    answers("?", "a")
+    assert run_quiz(q, parse_diff(big), PLAIN) is True
+    out = capsys.readouterr().out
+    assert "line 0" in out
+    assert "line 199" not in out
+    assert "Open src/handlers.ts to read the rest." in out
+
+
+def test_a_normal_hunk_is_not_clipped(answers, capsys):
+    answers("?", "a")
+    run_quiz(quiz(1), files(), PLAIN)
+    assert "more lines" not in capsys.readouterr().out
