@@ -3,7 +3,7 @@
 The Spare Parts command line.
 
 ```
-pip install -e .
+pip install ".[anthropic]"     # or [openai], or [gemini], or [all]
 sp
 ```
 
@@ -34,12 +34,16 @@ you run before a merge, not on every commit.
 
 ### Providers
 
-Anthropic, OpenAI and Gemini. A bare install ships Anthropic; the other two are
-extras:
+Anthropic, OpenAI and Gemini, and no vendor is the assumed one. Install the SDK
+for whichever you use:
 
 ```sh
-pip install -e ".[openai]"     # or [gemini], or [all]
+pip install ".[anthropic]"     # or [openai], or [gemini], or [all]
 ```
+
+Name nobody and `sp` uses whichever key you have set. With more than one set it
+picks in the order below, which is a tie-break rather than a ranking; name
+`provider:` in `.github/lgtm.yml` to decide it yourself.
 
 | Vendor | Key | Default model | Typical run |
 |---|---|---|---|

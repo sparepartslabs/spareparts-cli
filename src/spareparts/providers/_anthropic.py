@@ -19,7 +19,12 @@ MAX_TOKENS = 16000
 
 class AnthropicProvider:
     def __init__(self, model: str):
-        import anthropic
+        try:
+            import anthropic
+        except ImportError as err:
+            raise ProviderError(
+                "anthropic support is not installed — `pip install spareparts-cli[anthropic]`."
+            ) from err
 
         self.label = f"anthropic:{model}"
         self.model = model
