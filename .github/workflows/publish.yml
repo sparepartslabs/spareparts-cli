@@ -1,0 +1,53 @@
+name: Publish to PyPI
+
+# Releases are tags. `git tag v0.2.0 && git push --tags` publishes 0.2.0 and
+# nothing else does, so what is on PyPI is always something someone chose to
+# put there.
+
+on:
+  push:
+    tags:
+      - "v*" # e.g. v0.1.0
+
+permissions:
+  contents: read
+  id-token: write # PyPI Trusted Publishing (OIDC)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # A tag that disagrees with pyproject publishes a version nobody asked
+      # for, under a name that already means something else. Cheaper to fail
+      # here than to yank a release: PyPI will not let the number be reused.
+      - name: The tag must match the version in pyproject
+        run: |
+          python - <<'PY'
+          import os, sys, tomllib
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          with open("pyproject.toml", "rb") as f:
+              declared = tomllib.load(f)["project"]["version"]
+          if tag != declared:
+              sys.exit(f"tag {tag} does not match pyproject version {declared}")
+          print(f"releasing {declared}")
+          PY
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      # Trusted Publishing, so there is no API token to store or rotate. PyPI
+      # is configured to trust this repository, this workflow file, and the
+      # `pypi` environment above; changing any of those three breaks the
+      # release until PyPI's publisher settings are updated to match.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,110 @@
+name: Update Homebrew tap
+
+# On every release tag, point the sparepartslabs/homebrew-tap formula at the new
+# PyPI sdist. Runs alongside publish.yml (same v* trigger) and waits for the
+# sdist to appear on PyPI before reading its canonical URL + sha256.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: v
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch sdist url + sha256 from PyPI (wait for publish)
+        id: pypi
+        run: |
+          VERSION="${{ steps.v.outputs.version }}"
+          for i in $(seq 1 30); do
+            JSON=$(curl -fsSL "https://pypi.org/pypi/spareparts-cli/${VERSION}/json" || true)
+            URL=$(printf '%s' "$JSON" | jq -r '.urls[]? | select(.packagetype=="sdist") | .url')
+            SHA=$(printf '%s' "$JSON" | jq -r '.urls[]? | select(.packagetype=="sdist") | .digests.sha256')
+            if [ -n "$URL" ] && [ "$URL" != "null" ]; then break; fi
+            echo "sdist for ${VERSION} not on PyPI yet, retrying ($i)..."
+            sleep 10
+          done
+          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+            echo "::error::spareparts-cli ${VERSION} sdist not found on PyPI"; exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: sparepartslabs/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Update formula (url, sha256, and vendored resources)
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          URL: ${{ steps.pypi.outputs.url }}
+          SHA: ${{ steps.pypi.outputs.sha }}
+        run: |
+          F=Formula/spareparts-cli.rb
+          sed -i -E "s#^  url \".*\"#  url \"${URL}\"#" "$F"
+          sed -i -E "s#^  sha256 \".*\"#  sha256 \"${SHA}\"#" "$F"
+
+          # Refresh the vendored `resource` blocks. `brew update-python-resources`
+          # can't be used on release day (it skips PyPI uploads less than a day
+          # old), so resolve the deps in a throwaway venv and read each sdist
+          # url+sha256 from PyPI.
+          #
+          # `[all]` on purpose: pip installing this package brings no vendor SDK,
+          # because none of the three is the assumed one. A brew install has no
+          # extras syntax to offer, so the bottle carries all three and the CLI
+          # uses whichever key you have set.
+          python3 - "$F" "$VERSION" <<'PY'
+          import json, re, subprocess, sys, tempfile, urllib.request, venv
+
+          formula, version = sys.argv[1], sys.argv[2]
+          tmp = tempfile.mkdtemp()
+          venv.create(f"{tmp}/v", with_pip=True)
+          pip = f"{tmp}/v/bin/pip"
+          subprocess.check_call([pip, "install", "-q", f"spareparts-cli[all]=={version}"])
+          freeze = subprocess.check_output([pip, "list", "--format=freeze"]).decode()
+
+          skip = {"spareparts-cli", "pip", "setuptools", "wheel"}
+          deps = []
+          for line in freeze.splitlines():
+              if "==" in line:
+                  name, ver = line.split("==", 1)
+                  if name.lower() not in skip:
+                      deps.append((name, ver))
+
+          blocks = []
+          for name, ver in sorted(deps, key=lambda x: x[0].lower()):
+              d = json.load(urllib.request.urlopen(f"https://pypi.org/pypi/{name}/{ver}/json"))
+              sd = next((u for u in d["urls"] if u["packagetype"] == "sdist"), None)
+              if not sd:
+                  sys.exit(f"no sdist for {name} {ver}")
+              blocks.append(
+                  f'  resource "{d["info"]["name"]}" do\n'
+                  f'    url "{sd["url"]}"\n'
+                  f'    sha256 "{sd["digests"]["sha256"]}"\n'
+                  f'  end'
+              )
+
+          text = open(formula).read()
+          # drop existing resource blocks, then insert fresh ones after depends_on
+          text = re.sub(r'\n  resource "[^"]+" do\n(?:.*\n)*?  end\n', '\n', text)
+          inject = "\n" + "\n\n".join(blocks) + "\n"
+          text = re.sub(r'(  depends_on "python@[^"]+"\n)', r'\1' + inject, text, count=1)
+          text = re.sub(r'\n{3,}', '\n\n', text)  # collapse blank runs (idempotent)
+          open(formula, "w").write(text)
+          print(f"refreshed {len(blocks)} resources: {', '.join(n for n, _ in deps)}")
+          PY
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "formula already up to date"; exit 0
+          fi
+          git commit -am "spareparts-cli ${VERSION}"
+          git push
