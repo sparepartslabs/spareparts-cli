@@ -1,3 +1,5 @@
+import pytest
+
 from spareparts.modules.lgtm.git import parse_numstat
 
 
@@ -36,3 +38,12 @@ def test_empty_output():
 
 def test_a_truncated_rename_record_does_not_loop_forever():
     assert parse_numstat("2\t2\t\0src/app.ts\0") == []
+
+
+def test_outside_a_repo_the_error_says_what_to_do(tmp_path, monkeypatch):
+    from spareparts.modules.lgtm.git import GitError, repo_root
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(GitError) as caught:
+        repo_root()
+    assert "cd into it first" in str(caught.value)

@@ -42,7 +42,19 @@ def _git(args: list[str], cwd: Path | None = None) -> str:
 
 
 def repo_root(start: Path | None = None) -> Path:
-    return Path(_git(["rev-parse", "--show-toplevel"], cwd=start).strip())
+    try:
+        return Path(_git(["rev-parse", "--show-toplevel"], cwd=start).strip())
+    except GitError as err:
+        # git's own words here are "fatal: not a git repository (or any of the
+        # parent directories)", which says what failed but not what to do about
+        # it. The overwhelmingly likely cause is being one directory up.
+        if "not a git repository" in str(err):
+            raise GitError(
+                f"{Path.cwd()} is not a git repository. "
+                "`sp lgtm` reads the diff from the repo you are standing in — "
+                "cd into it first."
+            ) from err
+        raise
 
 
 def default_range(cwd: Path | None = None) -> str:
