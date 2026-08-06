@@ -50,12 +50,16 @@ class Vendor:
     module: str
     #: The model used when nobody names one.
     #:
-    #: Only the Anthropic default has been verified against a live API by this
-    #: repo. The other two are conservative picks — if a vendor has retired or
-    #: renamed one, the failure is loud (the vendor's own "model not found"
-    #: reaches the terminal unchanged) and the fix is `--model` or the
-    #: `model:` key in `.github/lgtm.yml`. A default that must be guessed is
-    #: better guessed low than high.
+    #: Each of these was picked by listing the vendor's models with a live key,
+    #: not from memory — `gpt-5` and `gemini-2.5-pro` both still exist but are
+    #: a year behind, which is exactly the failure a remembered default
+    #: produces: it works, so nobody notices it is wrong.
+    #:
+    #: Gemini's is the tracking alias rather than a pinned version because the
+    #: vendor currently publishes no plain `gemini-3.x-pro` — only `-image`
+    #: variants — so a pinned pro model would mean pinning to 2.5 forever.
+    #: The other two pin, because a default that changes underneath a quiz
+    #: changes what the quiz asks.
     default_model: str
     #: Checked before the call, so a missing key is a sentence rather than a
     #: stack trace from inside a vendor SDK.
@@ -64,8 +68,8 @@ class Vendor:
 
 VENDORS: tuple[Vendor, ...] = (
     Vendor("anthropic", "spareparts.providers._anthropic", "claude-opus-5", ("ANTHROPIC_API_KEY",)),
-    Vendor("openai", "spareparts.providers._openai", "gpt-5", ("OPENAI_API_KEY",)),
-    Vendor("gemini", "spareparts.providers._gemini", "gemini-2.5-pro", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
+    Vendor("openai", "spareparts.providers._openai", "gpt-5.5", ("OPENAI_API_KEY",)),
+    Vendor("gemini", "spareparts.providers._gemini", "gemini-pro-latest", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
 )
 
 _BY_NAME = {v.name: v for v in VENDORS}

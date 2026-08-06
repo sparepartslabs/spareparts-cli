@@ -41,22 +41,26 @@ extras:
 pip install -e ".[openai]"     # or [gemini], or [all]
 ```
 
-| Vendor | Key | Default model |
-|---|---|---|
-| `anthropic` | `ANTHROPIC_API_KEY` | `claude-opus-5` |
-| `openai` | `OPENAI_API_KEY` | `gpt-5` |
-| `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-2.5-pro` |
+| Vendor | Key | Default model | Typical run |
+|---|---|---|---|
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-opus-5` | ~55s |
+| `openai` | `OPENAI_API_KEY` | `gpt-5.5` | ~65s |
+| `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-pro-latest` | ~115s |
 
 ```sh
 sp lgtm -p openai
-sp lgtm -p gemini --model gemini-2.5-flash
+sp lgtm -p gemini --model gemini-3.6-flash
 sp lgtm -p anthropic --verifier openai     # see below
 ```
 
-Only the Anthropic default has been exercised against a live API by this repo.
-The other two defaults are conservative picks; if a vendor has renamed or
-retired one, the failure is loud — the vendor's own "model not found" reaches
-the terminal — and the fix is `--model` or the `model:` key in the config.
+All three are exercised against live APIs, on a 32KB diff, and the timings above
+are from those runs.
+
+The defaults were chosen by listing each vendor's models with a live key. Gemini
+uses the tracking alias because the vendor currently publishes no plain
+`gemini-3.x-pro` — only `-image` variants — so pinning a pro model would mean
+pinning to 2.5 indefinitely. The other two pin, because a default that changes
+underneath a quiz changes what the quiz asks.
 
 ### Two vendors are better than one
 
@@ -75,6 +79,10 @@ That is the strongest arrangement available, and it is why the provider layer
 exists rather than a bare `--model` flag. It costs one extra vendor's tokens and
 nothing else — the verifier sees the question and the diff, never the
 proposer's reasoning.
+
+It also costs no extra wall-clock in practice: proposing and verifying are
+sequential either way, and the cross-vendor run above came in at 68s against
+55s for Anthropic alone.
 
 ### It is a self-check, not a gate
 
