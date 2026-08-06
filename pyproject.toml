@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "spareparts-cli"
+version = "0.1.0"
+description = "sp — the Spare Parts command line"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "UNLICENSED" }
+authors = [{ name = "Spare Parts Labs" }]
+
+# Deliberately thin. Everything the terminal rendering needs is in the stdlib;
+# a CLI people install to try one subcommand should not drag in a UI toolkit.
+#
+# `anthropic` is here rather than in an extra because it is the default vendor —
+# a bare install has to be able to do something. The other two are extras: most
+# people use one vendor, and none of them should have to install three SDKs to
+# find that out.
+dependencies = ["anthropic>=0.72", "PyYAML>=6.0"]
+
+[project.optional-dependencies]
+openai = ["openai>=2.0"]
+gemini = ["google-genai>=2.0"]
+all = ["openai>=2.0", "google-genai>=2.0"]
+dev = ["pytest>=8.0", "openai>=2.0", "google-genai>=2.0"]
+
+[project.scripts]
+sp = "spareparts.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spareparts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
