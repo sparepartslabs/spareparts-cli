@@ -24,9 +24,10 @@ only 1 as a failure — a tool that can't run must not stop a commit.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from dataclasses import replace
+
+from spareparts.providers import ProviderError, resolve
 
 from .ask import make_styler, run_quiz
 from .config import load_config
@@ -58,6 +59,21 @@ def register(parser: argparse.ArgumentParser) -> None:
         "--difficulty",
         choices=("easy", "medium", "hard"),
         help="How hard the distractors are. Overrides .github/lgtm.yml.",
+    )
+    parser.add_argument(
+        "-p",
+        "--provider",
+        help="Who writes the questions: anthropic, openai, gemini — "
+        "optionally `vendor:model`. Overrides .github/lgtm.yml.",
+    )
+    parser.add_argument(
+        "--verifier",
+        help="Who tries to refute them. Defaults to the proposer; naming a "
+        "different vendor is a stronger check than a model marking itself.",
+    )
+    parser.add_argument(
+        "--model",
+        help="Model for the proposer, overriding the vendor's default.",
     )
     parser.add_argument(
         "--dry-run",
@@ -104,20 +120,25 @@ def run(args: argparse.Namespace) -> int:
         # the flag annoying to use from a shell that checks `$?`.
         return EXIT_CONFIRMED
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print(
-            "sp lgtm: ANTHROPIC_API_KEY is not set — questions come from the model,\n"
-            "         so there is nothing to ask without it.",
-            file=sys.stderr,
-        )
+    # Both resolved before any work, so a bad provider name or a missing key is
+    # a sentence now rather than after a minute of proposing.
+    try:
+        proposer = resolve(args.provider or config.provider, args.model)
+        verifier_spec = args.verifier or config.verifier
+        verifier = resolve(verifier_spec) if verifier_spec else proposer
+    except ProviderError as err:
+        print(f"sp lgtm: {err}", file=sys.stderr)
         return EXIT_COULD_NOT_ASK
 
     diff = unified_diff(revspec, screened.paths)
 
-    import anthropic
-
-    print(f"Reading {revspec} ({len(screened.paths)} files)…", flush=True)
-    result = generate_from_diff(anthropic.Anthropic(), diff, config)
+    marking = (
+        f"{proposer.label} proposing, {verifier.label} verifying"
+        if verifier is not proposer
+        else f"{proposer.label}, marking its own work"
+    )
+    print(f"Reading {revspec} ({len(screened.paths)} files) — {marking}…", flush=True)
+    result = generate_from_diff(proposer, diff, config, verifier)
 
     if isinstance(result, Skip):
         print(f"sp lgtm: {result.reason}")

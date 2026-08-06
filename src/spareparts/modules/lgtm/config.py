@@ -42,6 +42,12 @@ class Config:
     difficulty: str = "medium"
     #: Globs never worth quizzing, on top of the built-in generated-file set.
     exempt_paths: tuple[str, ...] = ()
+    #: Who writes the questions. "anthropic", "openai:gpt-5", etc. None means
+    #: the default vendor.
+    provider: str | None = None
+    #: Who tries to refute them. None means the proposer does its own marking,
+    #: which is the weaker arrangement — see `generate_from_diff`.
+    verifier: str | None = None
 
 
 DEFAULTS = Config()
@@ -106,10 +112,22 @@ def parse_config(raw: Any) -> LoadedConfig:
         else:
             problems.append("`exemptPaths` must be a list of strings — ignored.")
 
+    # `provider` and `verifier` are validated by `spareparts.providers`, which
+    # owns the list of vendors. Checking the spelling here too would mean two
+    # places to update when a vendor is added, and they would drift.
+    providers: dict[str, str | None] = {"provider": None, "verifier": None}
+    for key in providers:
+        if raw.get(key) is None:
+            continue
+        if isinstance(raw[key], str) and raw[key].strip():
+            providers[key] = raw[key].strip()
+        else:
+            problems.append(f"`{key}` must be a provider name — ignored.")
+
     for key in raw:
         if key in ACTION_ONLY:
             continue
-        if key not in {"questions", "difficulty", "exemptPaths"}:
+        if key not in {"questions", "difficulty", "exemptPaths", "provider", "verifier"}:
             problems.append(f"`{key}` is not an LGTM setting — ignored.")
 
     return LoadedConfig(
@@ -118,6 +136,8 @@ def parse_config(raw: Any) -> LoadedConfig:
             questions=questions,
             difficulty=difficulty,
             exempt_paths=exempt_paths,
+            provider=providers["provider"],
+            verifier=providers["verifier"],
         ),
         problems,
     )

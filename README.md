@@ -29,9 +29,52 @@ sp lgtm -n 3 -d hard
 sp lgtm --dry-run             # what it would ask about, no model call
 ```
 
-Needs `ANTHROPIC_API_KEY`. Generation is three sequential model calls, so expect
-it to take a moment — this is a thing you run before a merge, not on every
-commit.
+Generation is three model calls, so expect it to take a moment — this is a thing
+you run before a merge, not on every commit.
+
+### Providers
+
+Anthropic, OpenAI and Gemini. A bare install ships Anthropic; the other two are
+extras:
+
+```sh
+pip install -e ".[openai]"     # or [gemini], or [all]
+```
+
+| Vendor | Key | Default model |
+|---|---|---|
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-opus-5` |
+| `openai` | `OPENAI_API_KEY` | `gpt-5` |
+| `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-2.5-pro` |
+
+```sh
+sp lgtm -p openai
+sp lgtm -p gemini --model gemini-2.5-flash
+sp lgtm -p anthropic --verifier openai     # see below
+```
+
+Only the Anthropic default has been exercised against a live API by this repo.
+The other two defaults are conservative picks; if a vendor has renamed or
+retired one, the failure is loud — the vendor's own "model not found" reaches
+the terminal — and the fix is `--model` or the `model:` key in the config.
+
+### Two vendors are better than one
+
+`sp lgtm` writes a question with one call and then asks a second call to refute
+it. A candidate that can't be refuted survives; everything else is dropped.
+
+Both calls going to the same model is the weak version of that check — a model
+asked to find fault with its own reasoning mostly doesn't. If you have keys for
+two vendors, split them:
+
+```sh
+sp lgtm --provider anthropic --verifier openai
+```
+
+That is the strongest arrangement available, and it is why the provider layer
+exists rather than a bare `--model` flag. It costs one extra vendor's tokens and
+nothing else — the verifier sees the question and the diff, never the
+proposer's reasoning.
 
 ### It is a self-check, not a gate
 
@@ -54,9 +97,14 @@ so a repo is configured once:
 ```yaml
 questions: 2          # 1-5
 difficulty: medium    # easy | medium | hard
+provider: anthropic   # anthropic | openai | gemini, or vendor:model
+verifier: openai      # optional; defaults to the proposer
 exemptPaths:
   - "docs/**"
 ```
+
+`provider` and `verifier` are read here but validated by the provider layer, so
+a typo is reported with the list of known vendors rather than silently ignored.
 
 Keys that only mean something to the Action (`enforce`, `webConcepts`,
 `surfaceReading`, `answerQuestions`, `exemptReviewers`) are accepted and

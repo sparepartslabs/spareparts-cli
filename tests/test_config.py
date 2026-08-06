@@ -54,3 +54,30 @@ def test_single_star_does_not_cross_directories():
 
 def test_dots_are_literal():
     assert not matches_any("srcXa.ts", ["src.a.ts"])
+
+
+def test_provider_and_verifier_are_read():
+    loaded = parse_config({"provider": "openai:gpt-5", "verifier": "gemini"})
+    assert loaded.config.provider == "openai:gpt-5"
+    assert loaded.config.verifier == "gemini"
+    assert loaded.problems == []
+
+
+def test_provider_is_not_validated_here():
+    # The vendor list lives in `spareparts.providers`; duplicating it here would
+    # mean two places to update, and they would drift. An unknown name is
+    # reported by `resolve`, with the known names in the message.
+    loaded = parse_config({"provider": "definitely-not-a-vendor"})
+    assert loaded.config.provider == "definitely-not-a-vendor"
+    assert loaded.problems == []
+
+
+def test_a_non_string_provider_is_ignored():
+    loaded = parse_config({"provider": 3})
+    assert loaded.config.provider is None
+    assert loaded.problems
+
+
+def test_provider_defaults_to_none():
+    assert DEFAULTS.provider is None
+    assert DEFAULTS.verifier is None

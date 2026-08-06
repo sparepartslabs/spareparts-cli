@@ -9,11 +9,11 @@ original refused. Every test here is a refusal except the first.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from typing import Any
 
 from spareparts.modules.lgtm.config import DEFAULTS
 from spareparts.modules.lgtm.generator import Quiz, Skip, generate_from_diff
+from spareparts.providers import ProviderError
 
 DIFF = """diff --git a/src/charge.ts b/src/charge.ts
 --- a/src/charge.ts
@@ -36,33 +36,31 @@ GOOD_QUESTION = {
 }
 
 
-@dataclass
-class _Block:
-    text: str
-    type: str = "text"
+VERIFY_MARKER = "Your job is to find a reason it should NOT be used"
 
 
-@dataclass
-class _Response:
-    content: list[_Block]
-    stop_reason: str = "end_turn"
-
-
-class StubClient:
+class StubProvider:
     """Answers propose and verify differently, and records what it was asked."""
 
-    def __init__(self, questions: list[dict[str, Any]], verdict: dict[str, Any]):
+    def __init__(
+        self,
+        questions: list[dict[str, Any]],
+        verdict: dict[str, Any],
+        label: str = "stub:model",
+    ):
+        self.label = label
         self.questions = questions
         self.verdict = verdict
         self.calls: list[str] = []
-        self.messages = self
 
-    def create(self, **kwargs) -> _Response:
-        prompt = kwargs["messages"][0]["content"]
-        is_verify = "Your job is to find a reason it should NOT be used" in prompt
+    def complete(self, prompt: str, schema: dict[str, Any]) -> str:
+        is_verify = VERIFY_MARKER in prompt
         self.calls.append("verify" if is_verify else "propose")
-        payload = self.verdict if is_verify else {"questions": self.questions}
-        return _Response(content=[_Block(text=json.dumps(payload))])
+        return json.dumps(self.verdict if is_verify else {"questions": self.questions})
+
+
+# The old name, so the tests below read the same as before the provider seam.
+StubClient = StubProvider
 
 
 SOUND = {"sound": True, "problem": ""}
@@ -134,31 +132,41 @@ def test_an_empty_diff_never_calls_the_model():
     assert client.calls == []
 
 
-def test_a_refusal_is_a_skip_not_a_crash():
-    class Refusing(StubClient):
-        def create(self, **kwargs):
-            return _Response(content=[], stop_reason="refusal")
+def test_a_provider_that_refuses_is_a_skip_not_a_crash():
+    class Refusing(StubProvider):
+        def complete(self, prompt, schema):
+            raise ProviderError("stub:model declined (unspecified).")
 
     result = generate_from_diff(Refusing([], {}), DIFF, DEFAULTS)
     assert isinstance(result, Skip)
-    assert "Declined" in result.reason
-
-
-def test_truncation_is_a_skip_not_a_crash():
-    class Truncating(StubClient):
-        def create(self, **kwargs):
-            return _Response(content=[], stop_reason="max_tokens")
-
-    assert isinstance(generate_from_diff(Truncating([], {}), DIFF, DEFAULTS), Skip)
+    assert "declined" in result.reason
 
 
 def test_a_verifier_that_throws_rejects_rather_than_approves():
-    class HalfBroken(StubClient):
-        def create(self, **kwargs):
-            prompt = kwargs["messages"][0]["content"]
-            if "Your job is to find a reason it should NOT be used" in prompt:
-                raise RuntimeError("network died")
-            return super().create(**kwargs)
+    class HalfBroken(StubProvider):
+        def complete(self, prompt, schema):
+            if VERIFY_MARKER in prompt:
+                raise ProviderError("network died")
+            return super().complete(prompt, schema)
 
     result = generate_from_diff(HalfBroken([GOOD_QUESTION], SOUND), DIFF, DEFAULTS)
     assert isinstance(result, Skip)
+
+
+def test_a_separate_verifier_does_the_marking():
+    # The arrangement the provider seam exists for: one vendor proposes, a
+    # different one is asked to refute.
+    proposer = StubProvider([GOOD_QUESTION], SOUND, label="a:one")
+    verifier = StubProvider([], SOUND, label="b:two")
+
+    result = generate_from_diff(proposer, DIFF, DEFAULTS, verifier)
+    assert isinstance(result, Quiz)
+    assert proposer.calls == ["propose"]
+    assert verifier.calls == ["verify"]
+
+
+def test_a_separate_verifier_can_veto_what_the_proposer_wrote():
+    proposer = StubProvider([GOOD_QUESTION], SOUND, label="a:one")
+    verifier = StubProvider([], {"sound": False, "problem": "ambiguous"}, label="b:two")
+
+    assert isinstance(generate_from_diff(proposer, DIFF, DEFAULTS, verifier), Skip)

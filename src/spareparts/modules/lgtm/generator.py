@@ -34,20 +34,16 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-import anthropic
+from spareparts.providers import Provider, ProviderError
 
 from .config import Config
 from .diff import FileDiff, is_grounded, parse_diff, render_for_prompt
-
-MODEL = "claude-opus-5"
 
 #: How much diff the proposer sees. Beyond this, the change is not quizzed.
 DIFF_BUDGET = 120_000
 
 #: Over-generate, then let verification cull.
 OVERSHOOT = 2
-
-MAX_CONTINUATIONS = 2
 
 
 @dataclass
@@ -222,15 +218,25 @@ def _verify_prompt(candidate: Candidate, diff: str) -> str:
 
 
 def generate_from_diff(
-    client: anthropic.Anthropic, diff: str, config: Config
+    proposer: Provider,
+    diff: str,
+    config: Config,
+    verifier: Provider | None = None,
 ) -> Quiz | Skip:
     """
     Generate a verified quiz from a unified diff.
+
+    `verifier` defaults to `proposer`, which is the weaker arrangement and the
+    one to move off when a second key is available: a model asked to refute its
+    own question is being asked to disagree with itself, and it mostly doesn't.
+    Passing a different vendor here is the whole reason the provider seam
+    exists.
 
     Never raises. Every failure is a `Skip` carrying a reason worth printing,
     because a generation problem should say so plainly rather than look like a
     quiz you passed.
     """
+    verifier = verifier or proposer
     files = parse_diff(diff)
     if not files:
         return Skip("No reviewable changes in this diff.")
@@ -240,7 +246,7 @@ def generate_from_diff(
         return Skip("Every file in this change is too large to quiz meaningfully.")
 
     try:
-        candidates = _propose(client, text, config)
+        candidates = _propose(proposer, text, config)
     except Exception as err:  # noqa: BLE001 — every failure is a skip, with its reason
         return Skip(str(err) or "Could not generate questions.")
 
@@ -254,7 +260,7 @@ def generate_from_diff(
 
     # Verified concurrently — each is independent, and someone is waiting.
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(grounded)) as pool:
-        verdicts = list(pool.map(lambda c: _verify(client, c, text), grounded))
+        verdicts = list(pool.map(lambda c: _verify(verifier, c, text), grounded))
 
     survivors = [c for c, v in zip(grounded, verdicts) if v[0]]
     if not survivors:
@@ -270,11 +276,9 @@ def generate_from_diff(
     )
 
 
-def _propose(
-    client: anthropic.Anthropic, diff: str, config: Config
-) -> list[Candidate]:
+def _propose(proposer: Provider, diff: str, config: Config) -> list[Candidate]:
     want = min(config.questions * OVERSHOOT, 8)
-    response = _complete(client, _propose_prompt(diff, config, want), PROPOSE_SCHEMA)
+    response = proposer.complete(_propose_prompt(diff, config, want), PROPOSE_SCHEMA)
 
     raw = json.loads(response)
     questions = raw.get("questions") if isinstance(raw, dict) else None
@@ -283,11 +287,9 @@ def _propose(
     return [c for c in (_as_candidate(q) for q in questions) if c is not None]
 
 
-def _verify(
-    client: anthropic.Anthropic, candidate: Candidate, diff: str
-) -> tuple[bool, str]:
+def _verify(verifier: Provider, candidate: Candidate, diff: str) -> tuple[bool, str]:
     try:
-        response = _complete(client, _verify_prompt(candidate, diff), VERIFY_SCHEMA)
+        response = verifier.complete(_verify_prompt(candidate, diff), VERIFY_SCHEMA)
         raw = json.loads(response)
         problem = raw.get("problem") if isinstance(raw, dict) else None
         # Anything but an explicit `True` is a rejection. A verifier that fails
@@ -296,41 +298,6 @@ def _verify(
         return sound, problem if isinstance(problem, str) else ""
     except Exception as err:  # noqa: BLE001 — a verifier that dies rejects
         return False, str(err) or "verification failed"
-
-
-def _complete(
-    client: anthropic.Anthropic, prompt: str, schema: dict[str, Any]
-) -> str:
-    """One structured call, with the server-tool pause loop handled."""
-    messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
-
-    for _ in range(MAX_CONTINUATIONS + 1):
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=16000,
-            output_config={
-                "effort": "high",
-                "format": {"type": "json_schema", "schema": schema},
-            },
-            messages=messages,
-        )
-
-        if response.stop_reason == "refusal":
-            category = getattr(response, "stop_details", None)
-            category = getattr(category, "category", None) or "unspecified"
-            raise RuntimeError(f"Declined ({category}).")
-        if response.stop_reason == "pause_turn":
-            messages.append({"role": "assistant", "content": response.content})
-            continue
-        if response.stop_reason == "max_tokens":
-            raise RuntimeError("Generation was truncated.")
-
-        text = "".join(b.text for b in response.content if b.type == "text")
-        if not text.strip():
-            raise RuntimeError("Generator returned nothing.")
-        return text
-
-    raise RuntimeError("Generation did not finish.")
 
 
 def _as_candidate(value: Any) -> Candidate | None:
