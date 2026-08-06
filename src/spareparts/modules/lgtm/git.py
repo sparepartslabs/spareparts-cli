@@ -79,9 +79,25 @@ def default_range(cwd: Path | None = None) -> str:
     )
 
 
+#: What `revspec` says when the subject is the index rather than a range.
+STAGED = "--staged"
+
+
+def _range_args(revspec: str) -> list[str]:
+    """
+    The `git diff` arguments for either a range or the staged changes.
+
+    `--cached` rather than a range because a pre-commit hook has no range to
+    name: the thing about to become a commit exists only in the index.
+    """
+    return ["--cached"] if revspec == STAGED else [revspec]
+
+
 def changed_files(revspec: str, cwd: Path | None = None) -> list[ChangedFile]:
     """Per-file line counts, for the cheap screen before any model call."""
-    return parse_numstat(_git(["diff", "--numstat", "-z", "--no-ext-diff", revspec], cwd=cwd))
+    return parse_numstat(
+        _git(["diff", "--numstat", "-z", "--no-ext-diff", *_range_args(revspec)], cwd=cwd)
+    )
 
 
 def parse_numstat(out: str) -> list[ChangedFile]:
@@ -128,7 +144,36 @@ def parse_numstat(out: str) -> list[ChangedFile]:
 def unified_diff(
     revspec: str, paths: list[str] | None = None, cwd: Path | None = None
 ) -> str:
-    args = ["diff", "--no-color", "--no-ext-diff", "-U3", revspec]
+    args = ["diff", "--no-color", "--no-ext-diff", "-U3", *_range_args(revspec)]
     if paths:
         args += ["--", *paths]
     return _git(args, cwd=cwd)
+
+
+def hooks_dir(cwd: Path | None = None) -> Path:
+    """
+    Where this repo's hooks actually live.
+
+    Not `.git/hooks`: `core.hooksPath` moves them, worktrees and submodules put
+    `.git` somewhere else entirely, and writing to the assumed path in either
+    case installs a hook that never runs — the worst possible outcome, because
+    it looks like it worked.
+    """
+    configured = _git(["config", "--get", "core.hooksPath"], cwd=cwd).strip() if _has_hooks_path(cwd) else ""
+    if configured:
+        path = Path(configured)
+        return path if path.is_absolute() else repo_root(cwd) / path
+
+    common = _git(["rev-parse", "--git-common-dir"], cwd=cwd).strip()
+    path = Path(common)
+    if not path.is_absolute():
+        path = repo_root(cwd) / path
+    return path / "hooks"
+
+
+def _has_hooks_path(cwd: Path | None) -> bool:
+    try:
+        return bool(_git(["config", "--get", "core.hooksPath"], cwd=cwd).strip())
+    except GitError:
+        # `--get` exits 1 when the key is unset. That is not an error.
+        return False

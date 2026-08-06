@@ -120,6 +120,53 @@ ignored. `-n` and `-d` override the file.
 
 Lockfiles, `dist/`, `vendor/`, `*.pbxproj` and friends are never quizzed.
 
+### As a git hook
+
+```sh
+sp lgtm install                       # pre-commit, advisory
+sp lgtm install --hook pre-push       # the closer analogue — see below
+sp lgtm install --blocking            # wrong answers stop the commit
+sp lgtm uninstall
+```
+
+The hook quizzes what is **staged** (`git diff --cached`), since a pre-commit
+hook has no revision range to name.
+
+**Advisory by default.** Generation is three model calls and about a minute. A
+hook that costs a minute *and* can stop your commit is a hook you delete within
+a week; one that just tells you is one you keep. `--blocking` is there when you
+want it, and even then only a wrong answer (exit 1) blocks — "couldn't ask"
+(exit 2, no API key, vendor outage, nothing quizzable) never costs you a commit.
+
+Escape hatches, in the order you'll want them:
+
+```sh
+SP_LGTM_SKIP=1 git commit ...    # skip this once
+git commit --no-verify ...       # skip every hook
+```
+
+It skips itself silently when there's no terminal — a rebase, a GUI client, CI.
+Git runs hooks with stdin closed, so the hook attaches `/dev/tty`; where there
+isn't one, nobody can answer and nobody failed.
+
+`sp lgtm install` refuses to overwrite a hook it didn't write (`--force`
+overrides), and honours `core.hooksPath` — writing to an assumed `.git/hooks`
+when that is set installs a hook that never runs, which looks exactly like
+success.
+
+#### Which hook
+
+`pre-commit` is the default because it's what people ask for, but it's worth
+knowing what it is. LGTM's premise is that the person answering *didn't write
+the code* — that's the point of quizzing a reviewer. At pre-commit time the
+author is you, seconds after typing it. That's a proofreading pass, and a fair
+use of the tool: it catches the change you made without noticing what else it
+touched. It isn't the same thing the Action does.
+
+`pre-push` is the closer analogue — the moment you hand work to someone else,
+and the moment a merge brings in code you didn't write. It also costs a minute
+per *push* rather than per *commit*, which is usually the trade you want.
+
 ### Exit codes
 
 | Code | Meaning |

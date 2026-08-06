@@ -42,6 +42,28 @@ def make_styler(stream=sys.stdout) -> Styler:
     return Styler(enabled=stream.isatty())
 
 
+class NoTerminal(RuntimeError):
+    """There is nobody to ask. Distinct from being asked and refusing."""
+
+
+def open_terminal():
+    """
+    Something to read answers from, or `NoTerminal`.
+
+    Git hooks run with stdin closed, so `input()` would hit EOF on the first
+    question and the whole quiz would read as "quit" — answered nothing, blamed
+    the person. The hook script attaches /dev/tty, but that is not always
+    possible: a GUI client, a rebase, CI. Those cases have to be told apart
+    from a refusal, because one of them means "skip" and the other means "no".
+    """
+    if sys.stdin.isatty():
+        return sys.stdin
+    try:
+        return open("/dev/tty")
+    except OSError as err:
+        raise NoTerminal("no terminal is attached") from err
+
+
 def _find_hunk(files: list[FileDiff], path: str, header: str) -> str | None:
     file = next((f for f in files if f.path == path), None)
     if file is None:
@@ -86,12 +108,25 @@ def _print_hunk(files: list[FileDiff], path: str, header: str, style: Styler) ->
     print()
 
 
+def _prompt(stream, message: str) -> str:
+    """`input()` reads stdin and nothing else; a hook needs /dev/tty."""
+    if stream is sys.stdin:
+        return input(message)
+    sys.stdout.write(message)
+    sys.stdout.flush()
+    line = stream.readline()
+    if line == "":
+        raise EOFError
+    return line.rstrip("\n")
+
+
 def _ask_one(
     index: int,
     total: int,
     quiz: Quiz,
     files: list[FileDiff],
     style: Styler,
+    stream,
 ) -> int | None:
     """
     Ask question `index`. Returns the chosen option, or None if they gave up.
@@ -111,7 +146,9 @@ def _ask_one(
     valid = LETTERS[: len(question.options)]
     while True:
         try:
-            raw = input(f"  Answer [{'/'.join(valid)}], ? to see the hunk, q to quit: ")
+            raw = _prompt(
+                stream, f"  Answer [{'/'.join(valid)}], ? to see the hunk, q to quit: "
+            )
         except EOFError:
             # No one is there — piped input that ran out. Not an answer.
             print()
@@ -128,7 +165,7 @@ def _ask_one(
         print(style(_DIM, "  Not one of the options — try again."))
 
 
-def run_quiz(quiz: Quiz, files: list[FileDiff], style: Styler) -> bool:
+def run_quiz(quiz: Quiz, files: list[FileDiff], style: Styler, stream=None) -> bool:
     """
     Ask everything, then re-ask what was wrong. Returns whether it ended
     confirmed.
@@ -138,13 +175,14 @@ def run_quiz(quiz: Quiz, files: list[FileDiff], style: Styler) -> bool:
     grader instead of the diff. Grading happens once, at the end of a pass, and
     the retry pass says only *which* ones and *where to look*.
     """
+    stream = stream if stream is not None else sys.stdin
     total = len(quiz.questions)
     remaining = list(range(total))
     answers: dict[int, int] = {}
 
     while remaining:
         for i in remaining:
-            choice = _ask_one(i, total, quiz, files, style)
+            choice = _ask_one(i, total, quiz, files, style, stream)
             if choice is None:
                 print(style(_DIM, "\n  Left without finishing — nothing recorded.\n"))
                 return False

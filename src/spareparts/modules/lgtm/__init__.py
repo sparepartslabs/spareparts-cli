@@ -29,11 +29,19 @@ from dataclasses import replace
 
 from spareparts.providers import ProviderError, resolve
 
-from .ask import make_styler, run_quiz
+from .ask import NoTerminal, make_styler, open_terminal, run_quiz
 from .config import load_config
 from .diff import parse_diff
 from .generator import Quiz, Skip, generate_from_diff
-from .git import GitError, changed_files, default_range, repo_root, unified_diff
+from . import hook as hooks
+from .git import (
+    STAGED,
+    GitError,
+    changed_files,
+    default_range,
+    repo_root,
+    unified_diff,
+)
 from .screen import screen
 
 EXIT_CONFIRMED = 0
@@ -45,8 +53,32 @@ def register(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "revspec",
         nargs="?",
-        help="What to review, e.g. `main...HEAD` or `abc123..def456`. "
-        "Defaults to what this branch adds since it left the default branch.",
+        help="What to review, e.g. `main...HEAD` or `abc123..def456`, or "
+        "`install` / `uninstall` to manage the git hook. Defaults to what this "
+        "branch adds since it left the default branch.",
+    )
+    parser.add_argument(
+        "--staged",
+        action="store_true",
+        help="Quiz what is staged rather than a range. What the hook uses.",
+    )
+    parser.add_argument(
+        "--hook",
+        choices=hooks.HOOKS,
+        default=hooks.DEFAULT_HOOK,
+        help=f"Which hook to install or remove (default: {hooks.DEFAULT_HOOK}). "
+        "pre-push is the closer analogue to reviewing someone else's work.",
+    )
+    parser.add_argument(
+        "--blocking",
+        action="store_true",
+        help="Let the hook stop the commit when answers are wrong. Off by "
+        "default: an advisory hook survives, a blocking one gets deleted.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing hook that sp did not write.",
     )
     parser.add_argument(
         "-n",
@@ -85,9 +117,12 @@ def register(parser: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> int:
     style = make_styler()
 
+    if args.revspec in ("install", "uninstall"):
+        return _manage_hook(args)
+
     try:
         root = repo_root()
-        revspec = args.revspec or default_range()
+        revspec = STAGED if args.staged else (args.revspec or default_range())
         files = changed_files(revspec)
     except GitError as err:
         print(f"sp lgtm: {err}", file=sys.stderr)
@@ -145,5 +180,39 @@ def run(args: argparse.Namespace) -> int:
         return EXIT_COULD_NOT_ASK
 
     assert isinstance(result, Quiz)
-    confirmed = run_quiz(result, parse_diff(diff), style)
+
+    try:
+        terminal = open_terminal()
+    except NoTerminal:
+        # Reached from a hook with no tty. Nobody can answer, so nobody failed.
+        print("sp lgtm: no terminal to ask on — skipping.", file=sys.stderr)
+        return EXIT_COULD_NOT_ASK
+
+    confirmed = run_quiz(result, parse_diff(diff), style, terminal)
     return EXIT_CONFIRMED if confirmed else EXIT_NOT_CONFIRMED
+
+
+def _manage_hook(args: argparse.Namespace) -> int:
+    try:
+        if args.revspec == "uninstall":
+            removed = hooks.uninstall(args.hook)
+            if removed is None:
+                print(f"sp lgtm: no {args.hook} hook to remove.")
+            else:
+                print(f"Removed {removed.path}")
+            return EXIT_CONFIRMED
+
+        result = hooks.install(args.hook, blocking=args.blocking, force=args.force)
+    except GitError as err:
+        print(f"sp lgtm: {err}", file=sys.stderr)
+        return EXIT_COULD_NOT_ASK
+
+    mode = "blocking" if args.blocking else "advisory"
+    print(f"{result.action.capitalize()} {result.path} ({mode}).")
+    print()
+    print(f"  Every `git {'commit' if args.hook == 'pre-commit' else 'push'}` now "
+          "asks about the change first.")
+    print("  Skip once with SP_LGTM_SKIP=1, or always with --no-verify.")
+    if not args.blocking:
+        print("  Wrong answers are reported but do not stop you — --blocking changes that.")
+    return EXIT_CONFIRMED
