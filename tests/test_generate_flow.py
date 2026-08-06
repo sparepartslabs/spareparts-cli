@@ -12,7 +12,12 @@ import json
 from typing import Any
 
 from spareparts.modules.lgtm.config import DEFAULTS
-from spareparts.modules.lgtm.generator import Quiz, Skip, generate_from_diff
+from spareparts.modules.lgtm.generator import (
+    VERIFY_SCHEMA,
+    Quiz,
+    Skip,
+    generate_from_diff,
+)
 from spareparts.providers import ProviderError
 
 DIFF = """diff --git a/src/charge.ts b/src/charge.ts
@@ -36,7 +41,15 @@ GOOD_QUESTION = {
 }
 
 
-VERIFY_MARKER = "Your job is to find a reason it should NOT be used"
+def _is_verify(schema: dict) -> bool:
+    """
+    Which stage this is, by schema rather than by prompt text.
+
+    Matching on wording made these tests break the moment the prompts moved
+    into the shared file and a sentence rewrapped — a false failure about
+    something the tests do not care about.
+    """
+    return schema is VERIFY_SCHEMA
 
 
 class StubProvider:
@@ -54,7 +67,7 @@ class StubProvider:
         self.calls: list[str] = []
 
     def complete(self, prompt: str, schema: dict[str, Any]) -> str:
-        is_verify = VERIFY_MARKER in prompt
+        is_verify = _is_verify(schema)
         self.calls.append("verify" if is_verify else "propose")
         return json.dumps(self.verdict if is_verify else {"questions": self.questions})
 
@@ -145,7 +158,7 @@ def test_a_provider_that_refuses_is_a_skip_not_a_crash():
 def test_a_verifier_that_throws_rejects_rather_than_approves():
     class HalfBroken(StubProvider):
         def complete(self, prompt, schema):
-            if VERIFY_MARKER in prompt:
+            if _is_verify(schema):
                 raise ProviderError("network died")
             return super().complete(prompt, schema)
 

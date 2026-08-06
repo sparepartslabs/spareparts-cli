@@ -36,6 +36,7 @@ from typing import Any
 
 from spareparts.providers import Provider, ProviderError
 
+from . import prompts
 from .config import Config
 from .diff import FileDiff, is_grounded, parse_diff, render_for_prompt
 
@@ -113,110 +114,6 @@ VERIFY_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
-DIFFICULTY_GUIDANCE = {
-    "easy": (
-        "Distractors should be clearly unrelated to what this hunk does — a "
-        "reviewer who read the change should rule them out immediately."
-    ),
-    "medium": (
-        "Distractors should be true statements about this change that do not "
-        "answer the question asked. Skimming the diff is not enough to rule "
-        "them out."
-    ),
-    "hard": (
-        "Distractors should be the plausible misreading: the behaviour BEFORE "
-        "the change, the branch not taken, an adjacent call site, or an effect "
-        "that looks right but happens one layer away. Only someone who read "
-        "this hunk closely can rule them out."
-    ),
-}
-
-
-def _propose_prompt(diff: str, config: Config, want: int) -> str:
-    return "\n".join(
-        [
-            "You are writing a short comprehension check for someone who has just",
-            "read this change and is about to accept it. The goal is to distinguish",
-            "someone who read the change from someone who skimmed the file list.",
-            "",
-            f"Write up to {want} multiple-choice questions. Fewer is fine. Zero is fine",
-            "if nothing in this diff is worth asking about.",
-            "",
-            "What to ask about, in priority order:",
-            "1. Behaviour changes — what the code now does that it did not before.",
-            "2. Error and edge paths — what a new guard prevents, what a changed",
-            "   catch block now swallows or rethrows.",
-            "3. Risk — a migration that touches existing rows, a changed default, a",
-            "   security-relevant edit, a widened permission.",
-            "",
-            "Hard rules:",
-            "- The question MUST be answerable from the diff shown, and nothing else.",
-            "  If answering needs knowledge of code not in this diff, do not ask it.",
-            "- Never ask about statistics: which file has the most lines added, how",
-            "  many files changed, the order of files. That is trivia — someone who",
-            "  read the change carefully would not know it, and someone who read",
-            "  nothing could look it up in seconds.",
-            "- Never ask about naming, formatting, or style.",
-            "- Exactly one option may be correct. The others must be clearly wrong to",
-            "  someone who read the hunk, and not obviously wrong to someone who did",
-            "  not.",
-            "- Give 3 options. Keep them the same rough length and shape — a longest",
-            "  or most-detailed option that is always the answer gives the game away.",
-            "- `file` must be a path shown below. `hunk` must be the exact `@@ ... @@`",
-            "  header of the hunk you drew the question from, copied verbatim.",
-            "- `rationale` explains why the correct option is correct, citing the",
-            "  specific lines. It is not shown to the person answering.",
-            "",
-            DIFFICULTY_GUIDANCE[config.difficulty],
-            "",
-            "The diff:",
-            "",
-            diff,
-        ]
-    )
-
-
-def _verify_prompt(candidate: Candidate, diff: str) -> str:
-    marked = [
-        f"  {'*' if i == candidate.correct else ' '} {option}"
-        for i, option in enumerate(candidate.options)
-    ]
-    return "\n".join(
-        [
-            "You are checking a comprehension question written by someone else for a",
-            "code reviewer. Your job is to find a reason it should NOT be used. Assume",
-            "it is flawed and look for the flaw. Only conclude it is sound if you",
-            "genuinely cannot find one.",
-            "",
-            "Mark it unsound if ANY of these is true:",
-            "- The stated correct answer is not actually correct according to the diff.",
-            "- Another option is also defensibly correct.",
-            "- The question cannot be answered from the diff alone.",
-            "- It asks about statistics, counts, file ordering, naming, or formatting",
-            "  rather than about what the change does.",
-            "- A reviewer who read this change carefully could still get it wrong —",
-            "  because it turns on an obscure detail, or is ambiguously worded.",
-            "- Someone who did NOT read the diff could pick the right option anyway:",
-            "  the correct option is the longest or most detailed, the distractors are",
-            "  nonsense, or the answer is inferable from the question wording.",
-            "- The cited hunk does not contain what the question claims.",
-            "",
-            "Be decisive. A wrong question fails a reviewer who did their job, which",
-            "is far worse than asking one fewer question. When in doubt, unsound.",
-            "",
-            f"Question: {candidate.prompt}",
-            *marked,
-            "(* marks the claimed answer)",
-            f"Cited: {candidate.file} {candidate.hunk}",
-            f"Author's rationale: {candidate.rationale}",
-            "",
-            "The diff:",
-            "",
-            diff,
-        ]
-    )
-
-
 def generate_from_diff(
     proposer: Provider,
     diff: str,
@@ -278,7 +175,9 @@ def generate_from_diff(
 
 def _propose(proposer: Provider, diff: str, config: Config) -> list[Candidate]:
     want = min(config.questions * OVERSHOOT, 8)
-    response = proposer.complete(_propose_prompt(diff, config, want), PROPOSE_SCHEMA)
+    response = proposer.complete(
+        prompts.propose(diff, config.difficulty, want), PROPOSE_SCHEMA
+    )
 
     raw = json.loads(response)
     questions = raw.get("questions") if isinstance(raw, dict) else None
@@ -289,7 +188,17 @@ def _propose(proposer: Provider, diff: str, config: Config) -> list[Candidate]:
 
 def _verify(verifier: Provider, candidate: Candidate, diff: str) -> tuple[bool, str]:
     try:
-        response = verifier.complete(_verify_prompt(candidate, diff), VERIFY_SCHEMA)
+        response = verifier.complete(
+            prompts.verify(
+                question=candidate.prompt,
+                options=candidate.options,
+                correct=candidate.correct,
+                cited=f"{candidate.file} {candidate.hunk}",
+                rationale=candidate.rationale,
+                diff=diff,
+            ),
+            VERIFY_SCHEMA,
+        )
         raw = json.loads(response)
         problem = raw.get("problem") if isinstance(raw, dict) else None
         # Anything but an explicit `True` is a rejection. A verifier that fails
