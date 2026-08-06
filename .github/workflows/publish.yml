@@ -1,0 +1,82 @@
+name: Publish to PyPI
+
+# Releases are tags. `git tag v0.2.0 && git push --tags` publishes 0.2.0 and
+# nothing else does, so what is on PyPI is always something someone chose to
+# put there.
+
+on:
+  push:
+    tags:
+      - "v*" # e.g. v0.1.0
+
+permissions:
+  contents: read
+  id-token: write # PyPI Trusted Publishing (OIDC)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # A tag that disagrees with pyproject publishes a version nobody asked
+      # for, under a name that already means something else. Cheaper to fail
+      # here than to yank a release: PyPI will not let the number be reused.
+      - name: The tag must match the version in pyproject
+        run: |
+          python - <<'PY'
+          import os, sys, tomllib
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          with open("pyproject.toml", "rb") as f:
+              declared = tomllib.load(f)["project"]["version"]
+          if tag != declared:
+              sys.exit(f"tag {tag} does not match pyproject version {declared}")
+          print(f"releasing {declared}")
+          PY
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      # Trusted Publishing, so there is no API token to store or rotate. PyPI
+      # is configured to trust this repository, this workflow file, and the
+      # `pypi` environment above; changing any of those three breaks the
+      # release until PyPI's publisher settings are updated to match.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  # A tag is a git object with no page. A release is where someone deciding
+  # whether to install this reads what changed and whether it is still alive,
+  # and PyPI shows them the current version and nothing about the last one.
+  #
+  # Its own job so that `publish` keeps `contents: read`: the job holding the
+  # PyPI identity token has no business also being able to write to the repo.
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Notes are generated from what changed since the previous tag, which
+          # a shallow clone cannot see.
+          fetch-depth: 0
+
+      # --generate-notes writes them from the pull requests merged since that
+      # tag, so there is no changelog to maintain by hand and no second place
+      # for the history to be wrong.
+      #
+      # The sdist and wheel are deliberately not attached: PyPI already serves
+      # them, and a second copy is one more thing that can disagree.
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
