@@ -74,7 +74,27 @@ VENDORS: tuple[Vendor, ...] = (
 
 _BY_NAME = {v.name: v for v in VENDORS}
 
-DEFAULT_VENDOR = "anthropic"
+#: Tie-break order when more than one key is set and nobody named a vendor.
+#: Not a statement that the first one is better: it is the order they appear in
+#: `VENDORS`, and it exists only so the same machine picks the same vendor twice
+#: in a row. Name `provider:` in `.github/lgtm.yml` to decide it yourself.
+PREFERENCE = tuple(v.name for v in VENDORS)
+
+
+def default_vendor() -> str:
+    """
+    The vendor to use when nobody named one: whichever key is actually set.
+
+    A hardcoded default made one vendor the assumed answer, so `sp lgtm` with
+    only `OPENAI_API_KEY` set failed by telling you Anthropic needed a key you
+    had no reason to have.
+    """
+    for name in PREFERENCE:
+        if name in available():
+            return name
+
+    keys = ", ".join(k for v in VENDORS for k in v.env_keys[:1])
+    raise ProviderError(f"No model key set. Set one of: {keys}.")
 
 
 def available() -> list[str]:
@@ -89,7 +109,7 @@ def resolve(spec: str | None, model: str | None = None) -> Provider:
     `model` is the flag form and wins over the `vendor:model` form, because a
     flag is typed now and the spec may have come out of a config file.
     """
-    spec = spec or DEFAULT_VENDOR
+    spec = spec or default_vendor()
     name, _, spec_model = spec.partition(":")
     name = name.strip().lower()
 

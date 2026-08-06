@@ -1,10 +1,10 @@
 import pytest
 
 from spareparts.providers import (
-    DEFAULT_VENDOR,
     VENDORS,
     ProviderError,
     available,
+    default_vendor,
     resolve,
 )
 from spareparts.providers._gemini import _plain
@@ -63,9 +63,32 @@ def test_available_reports_only_what_is_set(keys):
     assert set(available()) == {"anthropic", "openai"}
 
 
-def test_none_means_the_default_vendor(keys):
-    keys("ANTHROPIC_API_KEY")
-    assert resolve(None).label.startswith(f"{DEFAULT_VENDOR}:")
+def test_none_means_whichever_key_is_set(keys):
+    # Not a hardcoded vendor: the one you actually have credentials for.
+    # `keys` is additive within a test, so each vendor gets its own.
+    keys("OPENAI_API_KEY")
+    assert resolve(None).label.startswith("openai:")
+
+
+def test_none_with_only_a_google_key(keys):
+    keys("GEMINI_API_KEY")
+    assert resolve(None).label.startswith("gemini:")
+
+
+def test_more_than_one_key_picks_the_same_one_every_time(keys):
+    # Which one matters less than that it does not vary between runs.
+    keys("OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+    first = resolve(None).label
+    assert resolve(None).label == first
+    assert first.startswith("anthropic:")
+
+
+def test_no_key_at_all_names_every_variable_that_would_work(no_keys):
+    with pytest.raises(ProviderError) as caught:
+        default_vendor()
+    message = str(caught.value)
+    for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+        assert key in message
 
 
 def test_the_vendor_colon_model_form(keys):
