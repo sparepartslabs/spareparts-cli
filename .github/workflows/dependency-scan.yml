@@ -21,6 +21,7 @@ on:
 
 jobs:
   audit:
+    name: pip-audit
     runs-on: ubuntu-latest
     permissions:
       contents: read
