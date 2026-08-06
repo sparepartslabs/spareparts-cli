@@ -123,49 +123,54 @@ Lockfiles, `dist/`, `vendor/`, `*.pbxproj` and friends are never quizzed.
 ### As a git hook
 
 ```sh
-sp lgtm install                       # pre-commit, advisory
-sp lgtm install --hook pre-push       # the closer analogue — see below
-sp lgtm install --blocking            # wrong answers stop the commit
+sp lgtm install                       # pre-push, advisory
+sp lgtm install --hook pre-commit     # earlier, and once per commit
+sp lgtm install --blocking            # wrong answers stop the push
 sp lgtm uninstall
 ```
 
-The hook quizzes what is **staged** (`git diff --cached`), since a pre-commit
-hook has no revision range to name.
+**`pre-push` is the default.** The old framing for this tool was "the person
+answering didn't write the code" — that's why it quizzes a *reviewer*. That
+framing is dated: when a model wrote the diff, nobody in the loop wrote it, and
+the author is as much a reader as anyone. The useful question isn't who typed
+it, it's where the last cheap moment to catch it is — and that's before the code
+leaves your machine, which is left of anything the Action can do.
 
-**Advisory by default.** Generation is three model calls and about a minute. A
-hook that costs a minute *and* can stop your commit is a hook you delete within
-a week; one that just tells you is one you keep. `--blocking` is there when you
-want it, and even then only a wrong answer (exit 1) blocks — "couldn't ask"
-(exit 2, no API key, vendor outage, nothing quizzable) never costs you a commit.
+It also matches how the cost lands. Generation is three model calls and about a
+minute; per *push* that's fine, per *commit* it taxes every checkpoint you save.
+`--hook pre-commit` is there if you want it, and quizzes the staged diff.
+
+**Advisory by default.** A hook that costs a minute *and* can stop you is one
+you delete within a week. `--blocking` is opt-in, and even then only a wrong
+answer (exit 1) blocks — "couldn't ask" (exit 2: no API key, vendor outage,
+nothing quizzable) never costs you a push.
 
 Escape hatches, in the order you'll want them:
 
 ```sh
-SP_LGTM_SKIP=1 git commit ...    # skip this once
-git commit --no-verify ...       # skip every hook
+SP_LGTM_SKIP=1 git push ...    # skip this once
+git push --no-verify ...       # skip every hook
 ```
 
+#### What it reads
+
+`pre-push` quizzes exactly what you're about to push. Git names the refs on
+stdin, so the hook takes `<remote sha>..<local sha>` — the commits the remote
+doesn't have yet. A branch the remote has never seen has no such range, so it
+falls back to what the branch adds since it left the default branch. A push that
+only *deletes* a remote branch reads nothing at all.
+
+That ref list arrives on the same stdin the quiz needs for answers, so the hook
+consumes it before attaching `/dev/tty`.
+
 It skips itself silently when there's no terminal — a rebase, a GUI client, CI.
-Git runs hooks with stdin closed, so the hook attaches `/dev/tty`; where there
-isn't one, nobody can answer and nobody failed.
+Git runs hooks with stdin closed; where there's no tty, nobody can answer and
+nobody failed.
 
 `sp lgtm install` refuses to overwrite a hook it didn't write (`--force`
 overrides), and honours `core.hooksPath` — writing to an assumed `.git/hooks`
-when that is set installs a hook that never runs, which looks exactly like
+when that's set installs a hook that never runs, which looks exactly like
 success.
-
-#### Which hook
-
-`pre-commit` is the default because it's what people ask for, but it's worth
-knowing what it is. LGTM's premise is that the person answering *didn't write
-the code* — that's the point of quizzing a reviewer. At pre-commit time the
-author is you, seconds after typing it. That's a proofreading pass, and a fair
-use of the tool: it catches the change you made without noticing what else it
-touched. It isn't the same thing the Action does.
-
-`pre-push` is the closer analogue — the moment you hand work to someone else,
-and the moment a merge brings in code you didn't write. It also costs a minute
-per *push* rather than per *commit*, which is usually the trade you want.
 
 ### Exit codes
 

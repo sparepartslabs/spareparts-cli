@@ -32,21 +32,23 @@ from .git import GitError, hooks_dir
 
 HOOKS = ("pre-commit", "pre-push")
 
-#: `pre-commit` is what people ask for and what this defaults to.
+#: `pre-push` — the last point the work is still yours alone.
 #:
-#: It is worth knowing what it does and does not do. LGTM's premise is that the
-#: person answering did not write the code — that is the whole point of quizzing
-#: a reviewer. At pre-commit time the author is you, on your own working tree,
-#: seconds after typing it. Answering questions about your own uncommitted work
-#: is a proofreading pass, not a comprehension check, and it is a fair use of
-#: the tool: it catches the change you made without noticing what else it
-#: touched. It is simply not the same thing the Action does.
+#: LGTM's premise used to be stated as "the person answering did not write the
+#: code". That framing is dated: when a model wrote the diff, nobody in the
+#: loop wrote it, and the author is as much a reader as any reviewer. The
+#: useful question is not who typed it but *where the last cheap moment to
+#: catch it is* — and that is before it leaves the machine, not after a
+#: reviewer has spent attention on it.
 #:
-#: `pre-push` is the closer analogue — the moment you are about to hand work to
-#: someone else, and the moment a merge commit brings in code you did not
-#: write. `sp lgtm install --hook pre-push` gets that, and costs a minute per
-#: push rather than a minute per commit.
-DEFAULT_HOOK = "pre-commit"
+#: pre-push is that moment, and it is left of everything the Action can do.
+#: It also matches how the cost lands: a minute per push, not per commit, so
+#: the ten-commit afternoon is quizzed once rather than ten times.
+#:
+#: pre-commit remains available and is a fair proofreading pass — it catches
+#: what your change touched that you did not notice — but it charges a minute
+#: every time you save a checkpoint, which is how hooks get uninstalled.
+DEFAULT_HOOK = "pre-push"
 
 MARKER = "# installed by `sp lgtm install`"
 
@@ -57,34 +59,94 @@ class Result:
     action: str  # "installed" | "replaced" | "removed"
 
 
-def script(executable: str, blocking: bool) -> str:
+#: How each hook names the work it is about to let through.
+#:
+#: They could not be less alike, and using one for the other is silent: at
+#: pre-push nothing is staged, so a `--staged` pre-push hook quizzes an empty
+#: diff, exits "nothing to ask about", and passes every push forever while
+#: looking installed.
+_SUBJECT = {
+    # The index is the only place the pending commit exists.
+    "pre-commit": "--staged",
+    # Whereas a push already has commits, and git says which on stdin.
+    #
+    # Unquoted on purpose: when `range` is empty — a branch the remote has
+    # never seen — it must vanish so the CLI falls back to its own default,
+    # not arrive as an empty argument that parses as a revspec of "".
+    "pre-push": "$range",
+}
+
+
+def _range_block() -> str:
+    """
+    Work out what is about to be pushed, from what git puts on stdin.
+
+    git feeds a pre-push hook one line per ref:
+
+        <local ref> <local sha> <remote ref> <remote sha>
+
+    This has to be read *before* /dev/tty is attached, because it arrives on
+    the same stdin the quiz later needs — consume it first, then swap.
+
+    An all-zero remote sha means the branch is new there, so there is no
+    `remote..local` range to take; the empty string falls through to the CLI's
+    own default (what this branch adds since it left the default branch), which
+    is the right answer for a first push. An all-zero *local* sha is a branch
+    deletion, which has nothing to read.
+    """
+    return """# Read git's ref list before /dev/tty takes over stdin.
+range=""
+found=""
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+  case "$remote_sha" in
+    *[!0]*) range="$remote_sha..$local_sha" ;;
+    *) range="" ;;
+  esac
+  found=1
+  break
+done
+
+# `found` is not the same question as `range`. An empty range means "new
+# branch, use the default" and must go ahead; no ref at all — a push that only
+# deletes a remote branch, or pushes nothing — means there is nothing to read,
+# and falling through would quiz the current branch for no reason.
+[ -n "$found" ] || exit 0"""
+
+
+def script(executable: str, blocking: bool, hook: str = DEFAULT_HOOK) -> str:
     """
     The hook, as POSIX sh.
 
     Deliberately not `set -e`: every failure here must be inspected and turned
     into a decision, because the one unacceptable outcome is a hook that blocks
-    a commit for a reason that has nothing to do with the diff.
+    for a reason that has nothing to do with the diff.
     """
+    verb = "Commit" if hook == "pre-commit" else "Push"
     gate = (
         # Only "answered wrong" (1) blocks. "Could not ask" (2) — no API key, a
-        # vendor outage, nothing quizzable — must never cost someone a commit.
+        # vendor outage, nothing quizzable — must never cost anyone a push.
         'if [ "$status" -eq 1 ]; then\n'
-        '  echo "sp lgtm: not confirmed. Commit with --no-verify to override." >&2\n'
+        f'  echo "sp lgtm: not confirmed. {verb} with --no-verify to override." >&2\n'
         "  exit 1\n"
         "fi\n"
         "exit 0"
         if blocking
-        else "# Advisory: the answer is reported, the commit proceeds either way.\n"
+        else f"# Advisory: the answer is reported, the {verb.lower()} proceeds either way.\n"
         "exit 0"
     )
+
+    prelude = f"\n{_range_block()}\n" if hook == "pre-push" else ""
+    subject = _SUBJECT[hook]
 
     return f"""#!/bin/sh
 {MARKER}. Remove it with `sp lgtm uninstall`.
 
 # Escape hatches, in order of how often you will want them:
-#   SP_LGTM_SKIP=1 git commit ...   skip this once
-#   git commit --no-verify ...      skip every hook
+#   SP_LGTM_SKIP=1 git {verb.lower()} ...   skip this once
+#   git {verb.lower()} --no-verify ...      skip every hook
 [ -n "${{SP_LGTM_SKIP:-}}" ] && exit 0
+{prelude}
 
 # Git runs hooks with stdin closed. Without a terminal there is nobody to ask,
 # and that is a skip, not a failure — a rebase, a GUI client, or CI must not be
@@ -104,7 +166,7 @@ if ! (exec < /dev/tty) 2>/dev/null; then
   exit 0
 fi
 
-{executable} lgtm --staged < /dev/tty
+{executable} lgtm {subject} < /dev/tty
 status=$?
 
 {gate}
@@ -142,7 +204,7 @@ def install(
             )
         replaced = True
 
-    path.write_text(script(_executable(), blocking), encoding="utf-8")
+    path.write_text(script(_executable(), blocking, hook), encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return Result(path, "replaced" if replaced else "installed")
 

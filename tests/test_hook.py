@@ -93,13 +93,17 @@ def test_advisory_never_blocks(repo):
 
 def test_the_script_uses_an_absolute_executable(repo):
     # A GUI client's PATH is not your shell's, and sp usually lives in a venv.
-    body = hook.script(hook._executable(), blocking=False)
-    invocation = next(l for l in body.splitlines() if "lgtm --staged" in l)
-    assert invocation.lstrip().startswith(("/", '"/'))
+    for name in hook.HOOKS:
+        body = hook.script(hook._executable(), blocking=False, hook=name)
+        # The invocation, not the marker comment that also says "sp lgtm".
+        invocation = next(
+            l for l in body.splitlines() if " lgtm " in l and "< /dev/tty" in l
+        )
+        assert invocation.lstrip().startswith(("/", '"/')), name
 
 
-def test_the_script_quizzes_the_index(repo):
-    assert "lgtm --staged" in hook.script("/bin/sp", blocking=False)
+def test_the_commit_hook_quizzes_the_index(repo):
+    assert "lgtm --staged" in hook.script("/bin/sp", False, "pre-commit")
 
 
 # --- installing ------------------------------------------------------------
@@ -108,7 +112,7 @@ def test_the_script_quizzes_the_index(repo):
 def test_install_writes_an_executable_hook(repo):
     result = hook.install()
     assert result.action == "installed"
-    assert result.path == repo / ".git" / "hooks" / "pre-commit"
+    assert result.path == repo / ".git" / "hooks" / hook.DEFAULT_HOOK
     assert os.access(result.path, os.X_OK)
     assert hook.MARKER in result.path.read_text()
 
@@ -116,17 +120,17 @@ def test_install_writes_an_executable_hook(repo):
 def test_install_refuses_to_clobber_a_foreign_hook(repo):
     path = hooks_dir()
     path.mkdir(parents=True, exist_ok=True)
-    (path / "pre-commit").write_text("#!/bin/sh\necho someone else's\n")
+    (path / hook.DEFAULT_HOOK).write_text("#!/bin/sh\necho someone else's\n")
 
     with pytest.raises(GitError) as caught:
         hook.install()
     assert "--force" in str(caught.value)
     # And it really is untouched.
-    assert "someone else's" in (path / "pre-commit").read_text()
+    assert "someone else's" in (path / hook.DEFAULT_HOOK).read_text()
 
 
 def test_force_replaces_a_foreign_hook(repo):
-    path = hooks_dir() / "pre-commit"
+    path = hooks_dir() / hook.DEFAULT_HOOK
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("#!/bin/sh\necho mine\n")
     assert hook.install(force=True).action == "replaced"
@@ -143,8 +147,8 @@ def test_an_unknown_hook_name_is_rejected(repo):
         hook.install(hook="post-receive")
 
 
-def test_pre_push_installs_too(repo):
-    assert hook.install(hook="pre-push").path.name == "pre-push"
+def test_pre_commit_installs_too(repo):
+    assert hook.install(hook="pre-commit").path.name == "pre-commit"
 
 
 # --- uninstalling ----------------------------------------------------------
@@ -162,7 +166,7 @@ def test_uninstall_is_quiet_when_there_is_nothing(repo):
 
 
 def test_uninstall_leaves_a_foreign_hook_alone(repo):
-    path = hooks_dir() / "pre-commit"
+    path = hooks_dir() / hook.DEFAULT_HOOK
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("#!/bin/sh\necho theirs\n")
     with pytest.raises(GitError):
@@ -179,7 +183,7 @@ def test_hooks_dir_honours_core_hooks_path(repo):
     subprocess.run(["git", "config", "core.hooksPath", "myhooks"], cwd=repo, check=True)
     assert hooks_dir() == repo / "myhooks"
     installed = hook.install()
-    assert installed.path == repo / "myhooks" / "pre-commit"
+    assert installed.path == repo / "myhooks" / hook.DEFAULT_HOOK
 
 
 def test_hooks_dir_handles_an_absolute_hooks_path(repo, tmp_path):
@@ -192,3 +196,82 @@ def test_hooks_dir_handles_an_absolute_hooks_path(repo, tmp_path):
 
 def test_hooks_dir_defaults_to_the_git_dir(repo):
     assert hooks_dir() == repo / ".git" / "hooks"
+
+
+# --- pre-push: what is about to be pushed ----------------------------------
+
+ZERO = "0" * 40
+LOCAL = "a" * 40
+REMOTE = "b" * 40
+
+
+def _run_range_block(stdin: str) -> tuple[int, str]:
+    """Run the ref-parsing block exactly as git would drive it."""
+    body = hook._range_block() + '\necho "RANGE=[$range]"\n'
+    result = subprocess.run(
+        ["sh", "-c", body], input=stdin, capture_output=True, text=True
+    )
+    return result.returncode, result.stdout.strip()
+
+
+def test_an_existing_branch_is_the_remote_to_local_range():
+    code, out = _run_range_block(f"refs/heads/main {LOCAL} refs/heads/main {REMOTE}\n")
+    assert code == 0
+    assert out == f"RANGE=[{REMOTE}..{LOCAL}]"
+
+
+def test_a_new_branch_falls_through_to_the_cli_default():
+    # No remote counterpart means no remote..local range to take. Empty, so the
+    # unquoted $range vanishes and the CLI uses its own default.
+    code, out = _run_range_block(f"refs/heads/f {LOCAL} refs/heads/f {ZERO}\n")
+    assert code == 0
+    assert out == "RANGE=[]"
+
+
+def test_a_deletion_alone_reads_nothing_at_all():
+    # The bug this guards: an empty range would otherwise fall through to the
+    # CLI default and quiz the current branch when all you did was delete a
+    # remote one.
+    code, out = _run_range_block(f"(delete) {ZERO} refs/heads/gone {REMOTE}\n")
+    assert code == 0
+    assert out == ""
+
+
+def test_pushing_nothing_reads_nothing():
+    code, out = _run_range_block("")
+    assert code == 0
+    assert out == ""
+
+
+def test_a_deletion_does_not_hide_a_real_ref_behind_it():
+    code, out = _run_range_block(
+        f"(delete) {ZERO} refs/heads/gone {REMOTE}\n"
+        f"refs/heads/main {LOCAL} refs/heads/main {REMOTE}\n"
+    )
+    assert out == f"RANGE=[{REMOTE}..{LOCAL}]"
+
+
+def test_pre_push_reads_the_refs_before_taking_the_terminal():
+    # git sends the ref list on the same stdin the quiz later needs. Consuming
+    # it after the /dev/tty swap would read nothing.
+    body = hook.script("/bin/sp", blocking=False, hook="pre-push")
+    assert body.index("while read -r") < body.index("(exec < /dev/tty)")
+
+
+def test_the_two_hooks_name_different_subjects():
+    # Using one for the other is silent: nothing is staged at pre-push time, so
+    # a `--staged` pre-push hook quizzes an empty diff and passes forever.
+    assert "lgtm --staged" in hook.script("/bin/sp", False, "pre-commit")
+    assert "lgtm $range" in hook.script("/bin/sp", False, "pre-push")
+    assert "--staged" not in hook.script("/bin/sp", False, "pre-push")
+
+
+def test_pre_push_is_the_default():
+    assert hook.DEFAULT_HOOK == "pre-push"
+    assert hook.install().path.name == "pre-push"
+
+
+def test_the_push_hook_talks_about_pushing():
+    body = hook.script("/bin/sp", blocking=True, hook="pre-push")
+    assert "Push with --no-verify" in body
+    assert "git push --no-verify" in body
