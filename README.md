@@ -11,7 +11,31 @@ sp
 
 | Module | What it does |
 |---|---|
+| `sp ec` | Install Spec Kit-derived engineering-context commands |
 | `sp lgtm` | Prove you read a diff before you merge it |
+
+---
+
+## `sp ec`
+
+Installs the Spec Kit slash commands and their shared `.sp/` working area into
+a repo. Existing `.blitz/` working areas are migrated automatically, including
+renaming `memory/playbook.md` to `memory/constitution.md`.
+
+```sh
+sp ec install                    # auto-detect the coding agent
+sp ec install --agent claude
+sp ec install --all
+sp ec install --dir path/to/repo
+```
+
+When `--dir` is a folder of git repos, each repo gets its own commands and
+`.sp/` area. The workspace root gets the cross-repo `/huddle` command and a
+workspace constitution, but no pooled repo scaffold.
+
+The installer appends ignore rules for generated `.sp` state and templates,
+while keeping `.sp/memory/constitution.md` trackable. Blanket `.sp/` ignores
+are left untouched and reported as warnings.
 
 ---
 
