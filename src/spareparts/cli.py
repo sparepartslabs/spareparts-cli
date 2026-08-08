@@ -32,6 +32,11 @@ class Module:
 
 MODULES: tuple[Module, ...] = (
     Module(
+        name="ec",
+        summary="Install engineering-context commands for coding agents",
+        package="spareparts.modules.ec",
+    ),
+    Module(
         name="lgtm",
         summary="Prove you read a diff before you merge it",
         package="spareparts.modules.lgtm",

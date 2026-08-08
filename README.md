@@ -11,7 +11,67 @@ sp
 
 | Module | What it does |
 |---|---|
+| `sp ec` | Install engineering-context commands for coding agents |
 | `sp lgtm` | Prove you read a diff before you merge it |
+
+---
+
+## `sp ec`
+
+Installs engineering-context slash commands and their shared `.sp/` working
+area into a repo.
+
+```sh
+sp ec install                    # auto-detect the coding agent
+sp ec install --agent claude
+sp ec install --all
+sp ec install --dir path/to/repo
+```
+
+When `--dir` is a folder of git repos, each repo gets its own commands and
+`.sp/` area. The workspace root gets the cross-repo `/huddle` command and a
+workspace constitution, but no pooled repo scaffold.
+
+The installer appends ignore rules for generated `.sp` state and templates,
+while keeping `.sp/memory/constitution.md` trackable. Blanket `.sp/` ignores
+are left untouched and reported as warnings.
+
+### Guided integration setup
+
+Run diagnostics after installation:
+
+```sh
+sp ec doctor
+sp ec project setup
+```
+
+`doctor` reports the configured huddle store, GitHub CLI authentication, and
+whether a Linear MCP configuration or `LINEAR_API_KEY` is visible. Every
+missing capability includes the command or configuration needed to fix it.
+
+Setup can also be scripted:
+
+```sh
+sp ec project setup --provider github --url https://github.com/orgs/example/projects/1
+sp ec project setup --provider linear --url https://linear.app/example --team Engineering --transport mcp
+```
+
+### GitHub Projects huddle store
+
+Configure a workspace-level GitHub Project, then check access or synchronize a
+huddle manually:
+
+```sh
+sp ec project configure https://github.com/orgs/example/projects/1 --dir ..
+sp ec project status --dir ..
+sp ec project sync ../.sp/huddles/001-example/huddle.md --dry-run
+sp ec project sync ../.sp/huddles/001-example/huddle.md
+```
+
+`/huddle` prefers installed GitHub MCP tools capable of managing Projects. It
+falls back to `gh project` through `sp ec project sync`. Each draft item carries
+a stable huddle-path marker, so later syncs update it instead of creating a
+duplicate. Markdown remains authoritative when remote synchronization fails.
 
 ---
 
