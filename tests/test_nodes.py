@@ -60,6 +60,16 @@ def test_payload_captures_git_actor_and_trajectory(tmp_path, monkeypatch):
     assert body["git"]["dirty"] is False
 
 
+def test_payload_caps_status_to_api_limit(tmp_path):
+    artifact = tmp_path / "specs/001-food/spec.md"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text(f"# Food tracking\n\n**Status**: {'x' * 140}\n")
+
+    _, body = nodes.payload(artifact, tmp_path, event="synced")
+
+    assert body["status"] == "x" * 120
+
+
 def test_artifact_discovery_includes_huddles_and_spec_kit_outputs(tmp_path):
     paths = [
         tmp_path / ".sp/huddles/001-food/huddle.md",
