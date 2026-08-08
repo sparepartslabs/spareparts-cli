@@ -17,6 +17,9 @@ def test_configure_and_find_project(tmp_path):
     assert root == tmp_path
     assert project.owner == "sparepartslabs"
     assert project.number == 1
+    config = projects.work_management_config(tmp_path)
+    assert config is not None
+    assert config[1]["provider"] == "github"
 
 
 def test_invalid_project_url_is_rejected():
@@ -72,3 +75,18 @@ def test_sync_dry_run_does_not_write(tmp_path):
 
     result = projects.sync_huddle(huddle, dry_run=True, runner=runner)
     assert result["action"] == "create"
+
+
+def test_configure_linear_uses_provider_neutral_schema(tmp_path):
+    path = projects.configure_linear(
+        tmp_path, "spare-parts-labs", "Engineering", "mcp"
+    )
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document["work_management"] == {
+        "provider": "linear",
+        "workspace": "spare-parts-labs",
+        "team": "Engineering",
+        "sync": "prompt",
+        "transport": "mcp",
+    }
+    assert "github_projects" not in document

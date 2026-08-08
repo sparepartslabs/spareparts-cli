@@ -37,6 +37,27 @@ The installer appends ignore rules for generated `.sp` state and templates,
 while keeping `.sp/memory/constitution.md` trackable. Blanket `.sp/` ignores
 are left untouched and reported as warnings.
 
+### Guided integration setup
+
+Run diagnostics after installation:
+
+```sh
+sp ec doctor
+sp ec project setup
+```
+
+`doctor` reports the configured huddle store, GitHub CLI authentication, and
+whether a Linear MCP configuration or `LINEAR_API_KEY` is visible. Every
+missing capability includes the command or configuration needed to fix it.
+
+Setup can also be scripted:
+
+```sh
+sp ec project setup --provider github --url https://github.com/orgs/example/projects/1
+sp ec project setup --provider linear --url https://linear.app/example --team Engineering --transport mcp
+sp ec project setup --provider markdown
+```
+
 ### GitHub Projects huddle store
 
 Configure a workspace-level GitHub Project, then check access or synchronize a

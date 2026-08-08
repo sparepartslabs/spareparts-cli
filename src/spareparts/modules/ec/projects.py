@@ -64,9 +64,68 @@ def configure(root: Path, url: str) -> Path:
         "sync": "prompt",
         "transport": "auto",
     }
+    document["work_management"] = {
+        "provider": "github",
+        "url": project.url,
+        "sync": "prompt",
+        "transport": "auto",
+    }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     return path
+
+
+def configure_linear(
+    root: Path, workspace: str, team: str | None, transport: str = "auto"
+) -> Path:
+    path = config_path(root)
+    try:
+        document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, json.JSONDecodeError) as error:
+        raise ProjectError(f"cannot read {path}: {error}") from error
+    document["work_management"] = {
+        "provider": "linear",
+        "workspace": workspace.strip().strip("/"),
+        "team": team.strip() if team else None,
+        "sync": "prompt",
+        "transport": transport,
+    }
+    document.pop("github_projects", None)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def configure_markdown(root: Path) -> Path:
+    path = config_path(root)
+    try:
+        document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, json.JSONDecodeError) as error:
+        raise ProjectError(f"cannot read {path}: {error}") from error
+    document["work_management"] = {"provider": "markdown", "sync": "disabled"}
+    document.pop("github_projects", None)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def work_management_config(start: Path) -> tuple[Path, dict] | None:
+    directory = start if start.is_dir() else start.parent
+    for root in (directory, *directory.parents):
+        path = config_path(root)
+        if not path.exists():
+            continue
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ProjectError(f"invalid integrations configuration in {path}: {error}") from error
+        config = document.get("work_management")
+        if isinstance(config, dict):
+            return root, config
+        github = document.get("github_projects")
+        if isinstance(github, dict):
+            return root, {"provider": "github", **github}
+    return None
 
 
 def find_config(start: Path) -> tuple[Path, GitHubProject] | None:
@@ -77,7 +136,11 @@ def find_config(start: Path) -> tuple[Path, GitHubProject] | None:
             continue
         try:
             document = json.loads(path.read_text(encoding="utf-8"))
-            url = document["github_projects"]["url"]
+            work_management = document.get("work_management", {})
+            if work_management.get("provider") == "github":
+                url = work_management["url"]
+            else:
+                url = document["github_projects"]["url"]
         except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
             raise ProjectError(f"invalid GitHub Projects configuration in {path}: {error}") from error
         return root, parse_url(url)

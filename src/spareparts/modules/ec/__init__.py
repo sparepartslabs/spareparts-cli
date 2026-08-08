@@ -6,7 +6,7 @@ import argparse
 import shutil
 from pathlib import Path
 
-from spareparts.modules.ec import gitignore, installer, projects
+from spareparts.modules.ec import doctor, gitignore, installer, projects
 
 
 def register(parser: argparse.ArgumentParser) -> None:
@@ -25,8 +25,17 @@ def register(parser: argparse.ArgumentParser) -> None:
     install.add_argument("--ignore", action="append", default=[], metavar="PATH")
     install.add_argument("--force", action="store_true", help="Refresh installed files.")
 
-    project = commands.add_parser("project", help="Configure and sync GitHub Projects.")
+    diagnose = commands.add_parser("doctor", help="Check work-management access.")
+    diagnose.add_argument("--dir", default=".", help="Workspace or repo root.")
+
+    project = commands.add_parser("project", help="Configure and sync huddle stores.")
     project_commands = project.add_subparsers(dest="project_command", required=True)
+    setup = project_commands.add_parser("setup", help="Guided huddle-store setup.")
+    setup.add_argument("--dir", default=".", help="Workspace root.")
+    setup.add_argument("--provider", choices=["github", "linear", "markdown"])
+    setup.add_argument("--url", help="GitHub Project or Linear workspace URL.")
+    setup.add_argument("--team", help="Linear team name or key.")
+    setup.add_argument("--transport", choices=["auto", "mcp", "api"], default="auto")
     configure = project_commands.add_parser("configure", help="Set the huddle store.")
     configure.add_argument("url", help="GitHub Project URL.")
     configure.add_argument("--dir", default=".", help="Workspace root.")
@@ -140,7 +149,34 @@ def _install(args: argparse.Namespace) -> int:
 def run(args: argparse.Namespace) -> int:
     try:
         if args.ec_command == "install":
-            return _install(args)
+            result = _install(args)
+            if result == 0:
+                print("Run sp ec doctor --dir " + str(args.dir) + " to configure integrations.")
+            return result
+        if args.ec_command == "doctor":
+            print(doctor.render(Path(args.dir)))
+            return 0
+        if args.project_command == "setup":
+            provider = args.provider or input(
+                "Huddle store [github/linear/markdown]: "
+            ).strip().lower()
+            if provider == "github":
+                url = args.url or input("GitHub Project URL: ").strip()
+                path = projects.configure(Path(args.dir), url)
+            elif provider == "linear":
+                url = args.url or input("Linear workspace URL or slug: ").strip()
+                workspace = url.rstrip("/").rsplit("/", 1)[-1]
+                team = args.team
+                if team is None:
+                    team = input("Linear team name/key (optional): ").strip() or None
+                path = projects.configure_linear(Path(args.dir), workspace, team, args.transport)
+            elif provider == "markdown":
+                path = projects.configure_markdown(Path(args.dir))
+            else:
+                raise projects.ProjectError("provider must be github, linear, or markdown")
+            print(f"Configured {provider} huddle store -> {path}")
+            print(f"Run sp ec doctor --dir {args.dir} to verify access.")
+            return 0
         if args.project_command == "configure":
             path = projects.configure(Path(args.dir), args.url)
             print(f"Configured GitHub Projects huddle store -> {path}")
