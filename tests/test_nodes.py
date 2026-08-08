@@ -1,8 +1,17 @@
 import json
 import subprocess
+from io import BytesIO
 from pathlib import Path
 
 from spareparts.modules.ec import nodes
+
+
+class _Response(BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
 
 
 def test_configure_preserves_other_integrations(tmp_path):
@@ -106,3 +115,56 @@ def test_landed_at_ref_requires_the_exact_committed_content(tmp_path):
     huddle.parent.mkdir(parents=True)
     huddle.write_text("# Huddle\n")
     assert nodes._landed_at_ref(huddle, tmp_path, commit) is False
+
+
+def test_pull_huddles_downloads_all_and_authenticates(tmp_path, monkeypatch):
+    nodes.configure(tmp_path, "node_123", "https://example.test/")
+    monkeypatch.setenv("SPAREPARTS_READ_KEY", "read_secret")
+    seen = {}
+
+    def urlopen(request, timeout):
+        seen["request"] = request
+        return _Response(json.dumps({"huddles": [
+            {"huddle_id": "001-alpha", "content": "# Huddle: Alpha\n"},
+            {"huddle_id": "002-beta", "content": "# Huddle: Beta\n"},
+        ]}).encode())
+
+    monkeypatch.setattr(nodes.urllib.request, "urlopen", urlopen)
+    results = nodes.pull_huddles(tmp_path)
+
+    assert [result["action"] for result in results] == ["created", "created"]
+    assert (tmp_path / ".sp/huddles/001-alpha/huddle.md").read_text() == "# Huddle: Alpha\n"
+    assert seen["request"].full_url == "https://example.test/traces/v1/huddles"
+    assert seen["request"].get_header("Authorization") == "Bearer read_secret"
+    assert seen["request"].get_header("X-spareparts-node-id") == "node_123"
+
+
+def test_pull_huddles_preserves_existing_files_unless_forced(tmp_path, monkeypatch):
+    nodes.configure(tmp_path, "node_123")
+    monkeypatch.setenv("SPAREPARTS_READ_KEY", "read_secret")
+    path = tmp_path / ".sp/huddles/001-alpha/huddle.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("# Local edits\n")
+    monkeypatch.setattr(nodes, "_fetch_huddles", lambda *args: [
+        {"huddle_id": "001-alpha", "content": "# Remote\n"}
+    ])
+
+    assert nodes.pull_huddles(tmp_path)[0]["action"] == "skipped"
+    assert path.read_text() == "# Local edits\n"
+    assert nodes.pull_huddles(tmp_path, force=True)[0]["action"] == "updated"
+    assert path.read_text() == "# Remote\n"
+
+
+def test_pull_huddles_rejects_unsafe_ids(tmp_path, monkeypatch):
+    nodes.configure(tmp_path, "node_123")
+    monkeypatch.setenv("SPAREPARTS_READ_KEY", "read_secret")
+    monkeypatch.setattr(nodes, "_fetch_huddles", lambda *args: [
+        {"huddle_id": "../../escape", "content": "bad"}
+    ])
+
+    try:
+        nodes.pull_huddles(tmp_path)
+    except nodes.NodeSyncError as error:
+        assert "invalid huddle_id" in str(error)
+    else:
+        raise AssertionError("unsafe huddle ID was accepted")

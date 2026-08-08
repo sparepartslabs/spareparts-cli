@@ -85,6 +85,15 @@ sp ec node sync .sp/huddles/001-example/huddle.md
 sp ec node sync --all
 ```
 
+Download every huddle available to the configured node. Existing local files
+are preserved unless `--force` is passed:
+
+```bash
+export SPAREPARTS_READ_KEY=sp_...
+sp ec node pull
+sp ec node pull --force
+```
+
 Every revision includes the repository, branch, commit, dirty state, and the
 name/email resolved from `git config user.name` and `git config user.email`. Git
 identity is recorded as unverified until user login is introduced.
