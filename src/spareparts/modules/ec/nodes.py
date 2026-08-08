@@ -25,6 +25,7 @@ _ARTIFACT_NAMES = {
     "tasks.md": "tasks",
 }
 _STATUS_MAX_LENGTH = 120
+_HUDDLE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def _config_path(root: Path) -> Path:
@@ -211,6 +212,61 @@ def _send(
         raise NodeSyncError(f"node sync failed ({error.code}): {detail}") from error
     except urllib.error.URLError as error:
         raise NodeSyncError(f"node sync failed: {error.reason}") from error
+
+
+def _fetch_huddles(api_url: str, key: str, node_id: str) -> list[dict[str, Any]]:
+    request = urllib.request.Request(
+        f"{api_url.rstrip('/')}/traces/v1/huddles",
+        headers={"authorization": f"Bearer {key}", "x-spareparts-node-id": node_id},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            document = json.load(response)
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        raise NodeSyncError(f"huddle pull failed ({error.code}): {detail}") from error
+    except urllib.error.URLError as error:
+        raise NodeSyncError(f"huddle pull failed: {error.reason}") from error
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise NodeSyncError(f"huddle pull returned invalid JSON: {error}") from error
+
+    huddles = document.get("huddles") if isinstance(document, dict) else document
+    if not isinstance(huddles, list) or not all(isinstance(item, dict) for item in huddles):
+        raise NodeSyncError("huddle pull returned an invalid response")
+    return huddles
+
+
+def pull_huddles(start: Path, *, force: bool = False, dry_run: bool = False) -> list[dict[str, str]]:
+    """Download every huddle visible to the configured node."""
+    configured = find_config(start)
+    if configured is None:
+        raise NodeSyncError("no .sp/integrations.json with spareparts_node configuration found")
+    root, config = configured
+    key = os.environ.get("SPAREPARTS_READ_KEY")
+    if not key:
+        raise NodeSyncError("SPAREPARTS_READ_KEY is required")
+    remote = _fetch_huddles(config.get("api_url", _DEFAULT_API_URL), key, str(config["node_id"]))
+
+    results: list[dict[str, str]] = []
+    for item in remote:
+        huddle_id = item.get("huddle_id") or item.get("id")
+        content = item.get("content")
+        if not isinstance(huddle_id, str) or not _HUDDLE_ID.fullmatch(huddle_id):
+            raise NodeSyncError("huddle pull returned an invalid huddle_id")
+        if not isinstance(content, str):
+            raise NodeSyncError(f"huddle {huddle_id!r} has no content")
+        path = root / ".sp" / "huddles" / huddle_id / "huddle.md"
+        relative = path.relative_to(root).as_posix()
+        if path.exists() and not force:
+            results.append({"action": "skipped", "path": relative})
+            continue
+        action = "updated" if path.exists() else "created"
+        if not dry_run:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        results.append({"action": action, "path": relative})
+    return results
 
 
 def sync(

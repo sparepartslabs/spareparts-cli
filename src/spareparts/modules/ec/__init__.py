@@ -56,6 +56,10 @@ def register(parser: argparse.ArgumentParser) -> None:
     node_sync.add_argument("--dir", default=".", help="Workspace root.")
     node_sync.add_argument("--all", action="store_true")
     node_sync.add_argument("--dry-run", action="store_true")
+    node_pull = node_commands.add_parser("pull", help="Download all huddles from the API.")
+    node_pull.add_argument("--dir", default=".", help="Workspace root.")
+    node_pull.add_argument("--force", action="store_true", help="Replace existing huddle files.")
+    node_pull.add_argument("--dry-run", action="store_true")
     reconcile = node_commands.add_parser("reconcile", help="Mark artifacts present on main.")
     reconcile.add_argument("--dir", default=".", help="Workspace root.")
     reconcile.add_argument("--ref", required=True, dest="main_commit")
@@ -176,6 +180,12 @@ def run(args: argparse.Namespace) -> int:
             if args.node_command == "configure":
                 path = nodes.configure(Path(args.dir), args.node_id, args.api_url)
                 print(f"Configured Spare Parts node {args.node_id} -> {path}")
+                return 0
+            if args.node_command == "pull":
+                results = nodes.pull_huddles(Path(args.dir), force=args.force, dry_run=args.dry_run)
+                for result in results:
+                    print(f"{result['action']} {result['path']}")
+                print(f"Pulled {len(results)} huddle(s).")
                 return 0
             if args.node_command == "sync":
                 if not args.all and not args.path:
