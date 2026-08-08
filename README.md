@@ -37,6 +37,23 @@ The installer appends ignore rules for generated `.sp` state and templates,
 while keeping `.sp/memory/constitution.md` trackable. Blanket `.sp/` ignores
 are left untouched and reported as warnings.
 
+### GitHub Projects huddle store
+
+Configure a workspace-level GitHub Project, then check access or synchronize a
+huddle manually:
+
+```sh
+sp ec project configure https://github.com/orgs/example/projects/1 --dir ..
+sp ec project status --dir ..
+sp ec project sync ../.sp/huddles/001-example/huddle.md --dry-run
+sp ec project sync ../.sp/huddles/001-example/huddle.md
+```
+
+`/huddle` prefers installed GitHub MCP tools capable of managing Projects. It
+falls back to `gh project` through `sp ec project sync`. Each draft item carries
+a stable huddle-path marker, so later syncs update it instead of creating a
+duplicate. Markdown remains authoritative when remote synchronization fails.
+
 ---
 
 ## `sp lgtm`

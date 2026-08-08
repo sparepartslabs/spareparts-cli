@@ -16,6 +16,22 @@ You are running at the **workspace root** — a folder that contains multiple gi
 
 **Golden rule**: never write specs, plans, or tasks into the workspace root's `.sp/` or a shared `specs/` directory. Repo-scoped artifacts live in their repo. The only workspace-level artifact is the huddle document described below.
 
+## Work-management integration
+
+If `.sp/integrations.json` contains `github_projects`, mirror the huddle into
+that project after every huddle document update:
+
+1. Prefer an available GitHub MCP server when it exposes GitHub Projects draft
+   item list/create/update tools. Preserve the marker
+   `<!-- sp:huddle:.sp/huddles/NNN-name/huddle.md -->` in the item body and use
+   it to update rather than duplicate the item.
+2. If no suitable MCP tools are available, run
+   `sp ec project sync .sp/huddles/NNN-name/huddle.md`.
+3. A sync failure MUST NOT discard or roll back the local Markdown document.
+   Report the failure and continue with Markdown as the source of truth.
+4. Never create a remote item when the configuration is absent. Suggest
+   `sp ec project configure <github-project-url>` instead.
+
 ## Step 1 — Discover the workspace
 
 1. Find every Spec Kit-enabled repo: directories at or below the workspace root (max depth 4) that contain both `.git` and `.sp/`. Skip hidden dirs and `node_modules`, `__pycache__`, `.venv`, `venv`, `vendor`, `dist`, `build`. Do not descend inside a repo looking for nested repos. A single `find`/`ls` pass is fine, e.g.:
