@@ -1,8 +1,7 @@
 name: Publish to PyPI
 
-# Releases are tags. `git tag v0.2.0 && git push --tags` publishes 0.2.0 and
-# nothing else does, so what is on PyPI is always something someone chose to
-# put there.
+# Releases are tags. A conventional commit merged to main creates the next tag;
+# a manually pushed tag remains supported for recovery and exceptional releases.
 
 on:
   push:
@@ -40,28 +39,31 @@ jobs:
         with:
           python-version: "3.12"
 
-      # A tag that disagrees with pyproject publishes a version nobody asked
-      # for, under a name that already means something else. Cheaper to fail
-      # here than to yank a release: PyPI will not let the number be reused.
-      - name: The tag must match the version in pyproject
-        env:
-          TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          python - <<'PY'
-          import os, sys, tomllib
-          tag = os.environ["TAG"].removeprefix("v")
-          with open("pyproject.toml", "rb") as f:
-              declared = tomllib.load(f)["project"]["version"]
-          if tag != declared:
-              sys.exit(f"tag {tag} does not match pyproject version {declared}")
-          print(f"releasing {declared}")
-          PY
-
       - name: Install build tools
         run: pip install build
 
       - name: Build sdist and wheel
         run: python -m build
+
+      # hatch-vcs derives package metadata from the checked-out tag. Check the
+      # built artifact rather than keeping a second version in pyproject.toml.
+      - name: The tag must match the built package version
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python - <<'PY'
+          import email, os, pathlib, sys, zipfile
+
+          tag = os.environ["TAG"].removeprefix("v")
+          wheel = next(pathlib.Path("dist").glob("*.whl"))
+          with zipfile.ZipFile(wheel) as archive:
+              metadata_path = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+              metadata = email.message_from_bytes(archive.read(metadata_path))
+          built = metadata["Version"]
+          if tag != built:
+              sys.exit(f"tag {tag} does not match built package version {built}")
+          print(f"releasing {built}")
+          PY
 
       # Trusted Publishing, so there is no API token to store or rotate. PyPI
       # is configured to trust this repository, this workflow file, and the

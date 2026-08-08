@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "spareparts-cli"
-version = "0.2.0"
+dynamic = ["version"]
 description = "sp — the Spare Parts command line"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -32,6 +32,19 @@ sp = "spareparts.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/spareparts"]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+version_scheme = "no-guess-dev"
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "scm"
+version_scheme = "semver2"
+tag_format = "v${version}"
+major_version_zero = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
