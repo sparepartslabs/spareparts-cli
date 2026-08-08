@@ -11,16 +11,15 @@ sp
 
 | Module | What it does |
 |---|---|
-| `sp ec` | Install Spec Kit-derived engineering-context commands |
+| `sp ec` | Install engineering-context commands for coding agents |
 | `sp lgtm` | Prove you read a diff before you merge it |
 
 ---
 
 ## `sp ec`
 
-Installs the Spec Kit slash commands and their shared `.sp/` working area into
-a repo. Existing `.blitz/` working areas are migrated automatically, including
-renaming `memory/playbook.md` to `memory/constitution.md`.
+Installs engineering-context slash commands and their shared `.sp/` working
+area into a repo.
 
 ```sh
 sp ec install                    # auto-detect the coding agent
