@@ -55,7 +55,6 @@ Setup can also be scripted:
 ```sh
 sp ec project setup --provider github --url https://github.com/orgs/example/projects/1
 sp ec project setup --provider linear --url https://linear.app/example --team Engineering --transport mcp
-sp ec project setup --provider markdown
 ```
 
 ### GitHub Projects huddle store

@@ -32,7 +32,7 @@ def register(parser: argparse.ArgumentParser) -> None:
     project_commands = project.add_subparsers(dest="project_command", required=True)
     setup = project_commands.add_parser("setup", help="Guided huddle-store setup.")
     setup.add_argument("--dir", default=".", help="Workspace root.")
-    setup.add_argument("--provider", choices=["github", "linear", "markdown"])
+    setup.add_argument("--provider", choices=["github", "linear"])
     setup.add_argument("--url", help="GitHub Project or Linear workspace URL.")
     setup.add_argument("--team", help="Linear team name or key.")
     setup.add_argument("--transport", choices=["auto", "mcp", "api"], default="auto")
@@ -157,9 +157,7 @@ def run(args: argparse.Namespace) -> int:
             print(doctor.render(Path(args.dir)))
             return 0
         if args.project_command == "setup":
-            provider = args.provider or input(
-                "Huddle store [github/linear/markdown]: "
-            ).strip().lower()
+            provider = args.provider or input("Huddle store [github/linear]: ").strip().lower()
             if provider == "github":
                 url = args.url or input("GitHub Project URL: ").strip()
                 path = projects.configure(Path(args.dir), url)
@@ -170,10 +168,8 @@ def run(args: argparse.Namespace) -> int:
                 if team is None:
                     team = input("Linear team name/key (optional): ").strip() or None
                 path = projects.configure_linear(Path(args.dir), workspace, team, args.transport)
-            elif provider == "markdown":
-                path = projects.configure_markdown(Path(args.dir))
             else:
-                raise projects.ProjectError("provider must be github, linear, or markdown")
+                raise projects.ProjectError("provider must be github or linear")
             print(f"Configured {provider} huddle store -> {path}")
             print(f"Run sp ec doctor --dir {args.dir} to verify access.")
             return 0
