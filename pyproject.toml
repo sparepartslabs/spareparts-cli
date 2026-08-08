@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "spareparts-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "sp — the Spare Parts command line"
 readme = "README.md"
 requires-python = ">=3.11"

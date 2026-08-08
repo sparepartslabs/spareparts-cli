@@ -32,7 +32,7 @@ jobs:
       # out explicitly matters on the manual path: the workflow file comes from
       # whichever branch was selected, and what gets built has to come from the
       # tag rather than from that branch's head.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref_name }}
 
@@ -82,7 +82,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref_name }}
           # Notes are generated from what changed since the previous tag, which
