@@ -131,11 +131,15 @@ def _linked_huddle(path: Path, root: Path) -> str | None:
     target = path.resolve()
     for huddle in huddles.glob("*/huddle.md"):
         for line in huddle.read_text(encoding="utf-8").splitlines():
-            columns = [column.strip().strip("`") for column in line.split("|")]
+            columns = [column.strip() for column in line.split("|")]
             if len(columns) < 5 or not columns[1] or not columns[3]:
                 continue
-            candidate = root / columns[1] / columns[3]
-            if candidate.resolve() == target:
+            repo_match = re.search(r"`([^`]+)`", columns[1])
+            spec_match = re.search(r"`([^`]+)`", columns[3])
+            repo_name = repo_match.group(1) if repo_match else columns[1].strip("`")
+            spec_path = spec_match.group(1) if spec_match else columns[3].strip("`")
+            candidate = (root / repo_name / spec_path).resolve()
+            if candidate == target or candidate == target.parent:
                 return huddle.parent.name
     return None
 
