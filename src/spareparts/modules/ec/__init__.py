@@ -6,7 +6,7 @@ import argparse
 import shutil
 from pathlib import Path
 
-from spareparts.modules.ec import doctor, gitignore, installer, projects
+from spareparts.modules.ec import doctor, gitignore, installer, nodes, projects
 
 
 def register(parser: argparse.ArgumentParser) -> None:
@@ -44,6 +44,22 @@ def register(parser: argparse.ArgumentParser) -> None:
     sync = project_commands.add_parser("sync", help="Create or update a huddle draft item.")
     sync.add_argument("huddle", help="Path to huddle.md.")
     sync.add_argument("--dry-run", action="store_true")
+
+    node = commands.add_parser("node", help="Sync huddles and specs to an API node.")
+    node_commands = node.add_subparsers(dest="node_command", required=True)
+    node_configure = node_commands.add_parser("configure", help="Configure the API node.")
+    node_configure.add_argument("--node", required=True, dest="node_id")
+    node_configure.add_argument("--api-url", default="https://api.sparepartslabs.com")
+    node_configure.add_argument("--dir", default=".", help="Workspace root.")
+    node_sync = node_commands.add_parser("sync", help="Sync one artifact or all artifacts.")
+    node_sync.add_argument("path", nargs="?")
+    node_sync.add_argument("--dir", default=".", help="Workspace root.")
+    node_sync.add_argument("--all", action="store_true")
+    node_sync.add_argument("--dry-run", action="store_true")
+    reconcile = node_commands.add_parser("reconcile", help="Mark artifacts present on main.")
+    reconcile.add_argument("--dir", default=".", help="Workspace root.")
+    reconcile.add_argument("--ref", required=True, dest="main_commit")
+    reconcile.add_argument("--dry-run", action="store_true")
 
 
 def _migrate_working_area(dest: Path) -> None:
@@ -156,6 +172,27 @@ def run(args: argparse.Namespace) -> int:
         if args.ec_command == "doctor":
             print(doctor.render(Path(args.dir)))
             return 0
+        if args.ec_command == "node":
+            if args.node_command == "configure":
+                path = nodes.configure(Path(args.dir), args.node_id, args.api_url)
+                print(f"Configured Spare Parts node {args.node_id} -> {path}")
+                return 0
+            if args.node_command == "sync":
+                if not args.all and not args.path:
+                    raise nodes.NodeSyncError("pass an artifact path or --all")
+                selected = None if args.all else [Path(args.path)]
+                results = nodes.sync(Path(args.dir), selected, dry_run=args.dry_run)
+            else:
+                results = nodes.sync(
+                    Path(args.dir), event="landed_on_main",
+                    main_commit=args.main_commit, dry_run=args.dry_run,
+                )
+            for result in results:
+                print(
+                    f"{result.get('event', result.get('latest_event', 'synced'))} "
+                    f"{result.get('path', result.get('source_path', result.get('artifact_id')))}"
+                )
+            return 0
         if args.project_command == "setup":
             provider = args.provider or input("Huddle store [github/linear]: ").strip().lower()
             if provider == "github":
@@ -192,6 +229,6 @@ def run(args: argparse.Namespace) -> int:
             f"{result['title']!r} in {result['project']}"
         )
         return 0
-    except projects.ProjectError as error:
+    except (projects.ProjectError, nodes.NodeSyncError) as error:
         print(f"sp ec: {error}")
         return 2

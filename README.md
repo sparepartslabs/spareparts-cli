@@ -73,6 +73,42 @@ falls back to `gh project` through `sp ec project sync`. Each draft item carries
 a stable huddle-path marker, so later syncs update it instead of creating a
 duplicate. Markdown remains authoritative when remote synchronization fails.
 
+### Spare Parts node sync
+
+Configure a node once at the workspace root. The ingest key stays in the
+environment and is never written to `.sp/integrations.json`:
+
+```bash
+sp ec node configure --node node_...
+export SPAREPARTS_INGEST_KEY=sp_...
+sp ec node sync .sp/huddles/001-example/huddle.md
+sp ec node sync --all
+```
+
+Every revision includes the repository, branch, commit, dirty state, and the
+name/email resolved from `git config user.name` and `git config user.email`. Git
+identity is recorded as unverified until user login is introduced.
+
+To record when artifacts reach `main`, run reconciliation from CI after every
+main-branch push:
+
+```yaml
+on:
+  push:
+    branches: [main]
+steps:
+  - uses: actions/checkout@v7
+    with:
+      fetch-depth: 0
+  - run: pipx install spareparts-cli
+  - run: sp ec node reconcile --ref "$GITHUB_SHA" --dir .
+    env:
+      SPAREPARTS_INGEST_KEY: ${{ secrets.SPAREPARTS_INGEST_KEY }}
+```
+
+The local Markdown remains authoritative if synchronization fails. Repeated
+sync and reconciliation calls are idempotent.
+
 ---
 
 ## `sp lgtm`
