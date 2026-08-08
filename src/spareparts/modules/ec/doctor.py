@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from spareparts.modules.ec import projects
+from spareparts.modules.ec import nodes, projects
 
 
 @dataclass(frozen=True)
@@ -42,6 +42,25 @@ def linear_mcp_files(root: Path, home: Path | None = None) -> list[Path]:
 
 def checks(root: Path) -> list[Check]:
     results: list[Check] = []
+
+    node = nodes.find_config(root)
+    if node is None:
+        results.append(Check("Spare Parts node", "missing", "No API node configured.", "Run: sp ec node configure --node NODE_ID"))
+    elif os.environ.get("SPAREPARTS_INGEST_KEY"):
+        results.append(Check("Spare Parts node", "ready", f"Node: {node[1]['node_id']}"))
+    else:
+        results.append(Check("Spare Parts node", "blocked", f"Node: {node[1]['node_id']}; ingest key missing.", "Set SPAREPARTS_INGEST_KEY."))
+
+    git_name = subprocess.run(
+        ["git", "config", "--get", "user.name"], cwd=root, capture_output=True, text=True, check=False
+    ).stdout.strip()
+    git_email = subprocess.run(
+        ["git", "config", "--get", "user.email"], cwd=root, capture_output=True, text=True, check=False
+    ).stdout.strip()
+    if git_name and git_email:
+        results.append(Check("Git identity", "ready", f"{git_name} <{git_email}> (unverified)"))
+    else:
+        results.append(Check("Git identity", "missing", "Git user.name or user.email is missing.", "Configure git user.name and git user.email."))
     configured = projects.work_management_config(root)
     provider = None
     if configured is None:
