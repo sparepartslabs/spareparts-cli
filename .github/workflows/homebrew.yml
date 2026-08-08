@@ -64,15 +64,12 @@ jobs:
           sed -i -E "s#^  url \".*\"#  url \"${URL}\"#" "$F"
           sed -i -E "s#^  sha256 \".*\"#  sha256 \"${SHA}\"#" "$F"
 
-          # Refresh the vendored `resource` blocks. `brew update-python-resources`
-          # can't be used on release day (it skips PyPI uploads less than a day
-          # old), so resolve the deps in a throwaway venv and read each sdist
-          # url+sha256 from PyPI.
-          #
-          # `[all]` on purpose: pip installing this package brings no vendor SDK,
-          # because none of the three is the assumed one. A brew install has no
-          # extras syntax to offer, so the bottle carries all three and the CLI
-          # uses whichever key you have set.
+          # Refresh vendored base `resource` blocks. Homebrew installs Python
+          # resources from source, so optional provider SDKs are deliberately
+          # excluded: their Rust-backed transitive dependencies (including
+          # cryptography and pydantic-core) are not reliable source builds in
+          # brew's isolated virtualenv. Provider extras remain available through
+          # pipx; the Homebrew package supports the dependency-light core CLI.
           python3 - "$F" "$VERSION" <<'PY'
           import json, re, subprocess, sys, tempfile, urllib.request, venv
 
@@ -80,7 +77,7 @@ jobs:
           tmp = tempfile.mkdtemp()
           venv.create(f"{tmp}/v", with_pip=True)
           pip = f"{tmp}/v/bin/pip"
-          subprocess.check_call([pip, "install", "-q", f"spareparts-cli[all]=={version}"])
+          subprocess.check_call([pip, "install", "-q", f"spareparts-cli=={version}"])
           freeze = subprocess.check_output([pip, "list", "--format=freeze"]).decode()
 
           skip = {"spareparts-cli", "pip", "setuptools", "wheel"}
