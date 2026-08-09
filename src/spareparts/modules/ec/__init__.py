@@ -132,9 +132,11 @@ def _install(args: argparse.Namespace) -> int:
         if not repos:
             print(f"No git repos found under {dest}/")
             return 2
+        inherited_agents = installer.detect_agents(dest) if not args.agent and not args.all else []
         workspace_agents: list[str] = []
         for repo in repos:
             agents = _resolve_agents(repo, args)
+            agents.extend(agent for agent in inherited_agents if agent not in agents)
             if not agents:
                 print(f"[{repo.name}] no agent tool detected; skipping (pass --agent/--all).")
                 continue

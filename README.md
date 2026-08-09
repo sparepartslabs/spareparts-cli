@@ -23,6 +23,7 @@ area into a repo.
 
 ```sh
 sp ec install                    # auto-detect the coding agent
+sp ec install --agent codex
 sp ec install --agent claude
 sp ec install --all
 sp ec install --dir path/to/repo
@@ -35,6 +36,10 @@ workspace constitution, but no pooled repo scaffold.
 The installer appends ignore rules for generated `.sp` state and templates,
 while keeping `.sp/memory/constitution.md` trackable. Blanket `.sp/` ignores
 are left untouched and reported as warnings.
+
+Codex commands are installed as repository skills under
+`.agents/skills/<command>/SKILL.md`. Codex is auto-detected from `AGENTS.md`,
+`.agents/`, or `.codex/` in the target repository.
 
 ### Guided integration setup
 
