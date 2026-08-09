@@ -78,25 +78,25 @@ falls back to `gh project` through `sp ec project sync`. Each draft item carries
 a stable huddle-path marker, so later syncs update it instead of creating a
 duplicate. Markdown remains authoritative when remote synchronization fails.
 
-### Spare Parts node sync
+### Spare Parts workspace sync
 
-Configure a node once at the workspace root. The ingest key stays in the
+Configure a workspace once at the workspace root. The ingest key stays in the
 environment and is never written to `.sp/integrations.json`:
 
 ```bash
-sp ec node configure --node node_...
+sp ec workspace configure --workspace workspace_...
 export SPAREPARTS_INGEST_KEY=sp_...
-sp ec node sync .sp/huddles/001-example/huddle.md
-sp ec node sync --all
+sp ec workspace sync .sp/huddles/001-example/huddle.md
+sp ec workspace sync --all
 ```
 
-Download every huddle available to the configured node. Existing local files
+Download every huddle available to the configured workspace. Existing local files
 are preserved unless `--force` is passed:
 
 ```bash
 export SPAREPARTS_READ_KEY=sp_...
-sp ec node pull
-sp ec node pull --force
+sp ec workspace pull
+sp ec workspace pull --force
 ```
 
 Every revision includes the repository, branch, commit, dirty state, and the
@@ -115,7 +115,7 @@ steps:
     with:
       fetch-depth: 0
   - run: pipx install spareparts-cli
-  - run: sp ec node reconcile --ref "$GITHUB_SHA" --dir .
+  - run: sp ec workspace reconcile --ref "$GITHUB_SHA" --dir .
     env:
       SPAREPARTS_INGEST_KEY: ${{ secrets.SPAREPARTS_INGEST_KEY }}
 ```

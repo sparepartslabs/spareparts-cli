@@ -6,7 +6,7 @@ import argparse
 import shutil
 from pathlib import Path
 
-from spareparts.modules.ec import doctor, gitignore, installer, nodes, projects
+from spareparts.modules.ec import doctor, gitignore, installer, projects, workspaces
 
 
 def register(parser: argparse.ArgumentParser) -> None:
@@ -45,22 +45,22 @@ def register(parser: argparse.ArgumentParser) -> None:
     sync.add_argument("huddle", help="Path to huddle.md.")
     sync.add_argument("--dry-run", action="store_true")
 
-    node = commands.add_parser("node", help="Sync huddles and specs to an API node.")
-    node_commands = node.add_subparsers(dest="node_command", required=True)
-    node_configure = node_commands.add_parser("configure", help="Configure the API node.")
-    node_configure.add_argument("--node", required=True, dest="node_id")
-    node_configure.add_argument("--api-url", default="https://api.sparepartslabs.com")
-    node_configure.add_argument("--dir", default=".", help="Workspace root.")
-    node_sync = node_commands.add_parser("sync", help="Sync one artifact or all artifacts.")
-    node_sync.add_argument("path", nargs="?")
-    node_sync.add_argument("--dir", default=".", help="Workspace root.")
-    node_sync.add_argument("--all", action="store_true")
-    node_sync.add_argument("--dry-run", action="store_true")
-    node_pull = node_commands.add_parser("pull", help="Download all huddles from the API.")
-    node_pull.add_argument("--dir", default=".", help="Workspace root.")
-    node_pull.add_argument("--force", action="store_true", help="Replace existing huddle files.")
-    node_pull.add_argument("--dry-run", action="store_true")
-    reconcile = node_commands.add_parser("reconcile", help="Mark artifacts present on main.")
+    workspace = commands.add_parser("workspace", help="Sync huddles and specs to an API workspace.")
+    workspace_commands = workspace.add_subparsers(dest="workspace_command", required=True)
+    workspace_configure = workspace_commands.add_parser("configure", help="Configure the API workspace.")
+    workspace_configure.add_argument("--workspace", required=True, dest="workspace_id")
+    workspace_configure.add_argument("--api-url", default="https://api.sparepartslabs.com")
+    workspace_configure.add_argument("--dir", default=".", help="Workspace root.")
+    workspace_sync = workspace_commands.add_parser("sync", help="Sync one artifact or all artifacts.")
+    workspace_sync.add_argument("path", nargs="?")
+    workspace_sync.add_argument("--dir", default=".", help="Workspace root.")
+    workspace_sync.add_argument("--all", action="store_true")
+    workspace_sync.add_argument("--dry-run", action="store_true")
+    workspace_pull = workspace_commands.add_parser("pull", help="Download all huddles from the API.")
+    workspace_pull.add_argument("--dir", default=".", help="Workspace root.")
+    workspace_pull.add_argument("--force", action="store_true", help="Replace existing huddle files.")
+    workspace_pull.add_argument("--dry-run", action="store_true")
+    reconcile = workspace_commands.add_parser("reconcile", help="Mark artifacts present on main.")
     reconcile.add_argument("--dir", default=".", help="Workspace root.")
     reconcile.add_argument("--ref", required=True, dest="main_commit")
     reconcile.add_argument("--dry-run", action="store_true")
@@ -178,24 +178,24 @@ def run(args: argparse.Namespace) -> int:
         if args.ec_command == "doctor":
             print(doctor.render(Path(args.dir)))
             return 0
-        if args.ec_command == "node":
-            if args.node_command == "configure":
-                path = nodes.configure(Path(args.dir), args.node_id, args.api_url)
-                print(f"Configured Spare Parts node {args.node_id} -> {path}")
+        if args.ec_command == "workspace":
+            if args.workspace_command == "configure":
+                path = workspaces.configure(Path(args.dir), args.workspace_id, args.api_url)
+                print(f"Configured Spare Parts workspace {args.workspace_id} -> {path}")
                 return 0
-            if args.node_command == "pull":
-                results = nodes.pull_huddles(Path(args.dir), force=args.force, dry_run=args.dry_run)
+            if args.workspace_command == "pull":
+                results = workspaces.pull_huddles(Path(args.dir), force=args.force, dry_run=args.dry_run)
                 for result in results:
                     print(f"{result['action']} {result['path']}")
                 print(f"Pulled {len(results)} huddle(s).")
                 return 0
-            if args.node_command == "sync":
+            if args.workspace_command == "sync":
                 if not args.all and not args.path:
-                    raise nodes.NodeSyncError("pass an artifact path or --all")
+                    raise workspaces.WorkspaceSyncError("pass an artifact path or --all")
                 selected = None if args.all else [Path(args.path)]
-                results = nodes.sync(Path(args.dir), selected, dry_run=args.dry_run)
+                results = workspaces.sync(Path(args.dir), selected, dry_run=args.dry_run)
             else:
-                results = nodes.sync(
+                results = workspaces.sync(
                     Path(args.dir), event="landed_on_main",
                     main_commit=args.main_commit, dry_run=args.dry_run,
                 )
@@ -241,6 +241,6 @@ def run(args: argparse.Namespace) -> int:
             f"{result['title']!r} in {result['project']}"
         )
         return 0
-    except (projects.ProjectError, nodes.NodeSyncError) as error:
+    except (projects.ProjectError, workspaces.WorkspaceSyncError) as error:
         print(f"sp ec: {error}")
         return 2

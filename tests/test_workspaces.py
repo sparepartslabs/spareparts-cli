@@ -3,7 +3,7 @@ import subprocess
 from io import BytesIO
 from pathlib import Path
 
-from spareparts.modules.ec import nodes
+from spareparts.modules.ec import workspaces
 
 
 class _Response(BytesIO):
@@ -19,12 +19,12 @@ def test_configure_preserves_other_integrations(tmp_path):
     path.parent.mkdir()
     path.write_text(json.dumps({"work_management": {"provider": "github"}}))
 
-    nodes.configure(tmp_path, "node_123", "http://localhost:8000/")
+    workspaces.configure(tmp_path, "workspace_123", "http://localhost:8000/")
 
     document = json.loads(path.read_text())
     assert document["work_management"]["provider"] == "github"
-    assert document["spareparts_node"] == {
-        "node_id": "node_123",
+    assert document["spareparts_workspace"] == {
+        "workspace_id": "workspace_123",
         "api_url": "http://localhost:8000",
         "sync": "prompt",
     }
@@ -52,9 +52,9 @@ def test_payload_captures_git_actor_and_trajectory(tmp_path, monkeypatch):
         ("branch", "--show-current"): "main",
         ("status", "--porcelain", "--", str(artifact)): "",
     }
-    monkeypatch.setattr(nodes, "_git", lambda args, cwd: answers.get(tuple(args)))
+    monkeypatch.setattr(workspaces, "_git", lambda args, cwd: answers.get(tuple(args)))
 
-    artifact_id, body = nodes.payload(
+    artifact_id, body = workspaces.payload(
         artifact, tmp_path, event="landed_on_main", main_commit="def456"
     )
 
@@ -74,7 +74,7 @@ def test_payload_caps_status_to_api_limit(tmp_path):
     artifact.parent.mkdir(parents=True)
     artifact.write_text(f"# Food tracking\n\n**Status**: {'x' * 140}\n")
 
-    _, body = nodes.payload(artifact, tmp_path, event="synced")
+    _, body = workspaces.payload(artifact, tmp_path, event="synced")
 
     assert body["status"] == "x" * 120
 
@@ -90,7 +90,7 @@ def test_artifact_discovery_includes_huddles_and_spec_kit_outputs(tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"# {path.stem}\n")
 
-    assert nodes.artifacts(tmp_path) == sorted(paths)
+    assert workspaces.artifacts(tmp_path) == sorted(paths)
 
 
 def test_landed_at_ref_requires_the_exact_committed_content(tmp_path):
@@ -108,17 +108,17 @@ def test_landed_at_ref_requires_the_exact_committed_content(tmp_path):
         capture_output=True, text=True,
     ).stdout.strip()
 
-    assert nodes._landed_at_ref(artifact, tmp_path, commit) is True
+    assert workspaces._landed_at_ref(artifact, tmp_path, commit) is True
     artifact.write_text("# Changed after main\n")
-    assert nodes._landed_at_ref(artifact, tmp_path, commit) is False
+    assert workspaces._landed_at_ref(artifact, tmp_path, commit) is False
     huddle = tmp_path / ".sp/huddles/001/huddle.md"
     huddle.parent.mkdir(parents=True)
     huddle.write_text("# Huddle\n")
-    assert nodes._landed_at_ref(huddle, tmp_path, commit) is False
+    assert workspaces._landed_at_ref(huddle, tmp_path, commit) is False
 
 
 def test_pull_huddles_downloads_all_and_authenticates(tmp_path, monkeypatch):
-    nodes.configure(tmp_path, "node_123", "https://example.test/")
+    workspaces.configure(tmp_path, "workspace_123", "https://example.test/")
     monkeypatch.setenv("SPAREPARTS_READ_KEY", "read_secret")
     seen = {}
 
@@ -129,42 +129,42 @@ def test_pull_huddles_downloads_all_and_authenticates(tmp_path, monkeypatch):
             {"huddle_id": "002-beta", "content": "# Huddle: Beta\n"},
         ]}).encode())
 
-    monkeypatch.setattr(nodes.urllib.request, "urlopen", urlopen)
-    results = nodes.pull_huddles(tmp_path)
+    monkeypatch.setattr(workspaces.urllib.request, "urlopen", urlopen)
+    results = workspaces.pull_huddles(tmp_path)
 
     assert [result["action"] for result in results] == ["created", "created"]
     assert (tmp_path / ".sp/huddles/001-alpha/huddle.md").read_text() == "# Huddle: Alpha\n"
     assert seen["request"].full_url == "https://example.test/traces/v1/huddles"
     assert seen["request"].get_header("Authorization") == "Bearer read_secret"
-    assert seen["request"].get_header("X-spareparts-node-id") == "node_123"
+    assert seen["request"].get_header("X-spareparts-workspace-id") == "workspace_123"
 
 
 def test_pull_huddles_preserves_existing_files_unless_forced(tmp_path, monkeypatch):
-    nodes.configure(tmp_path, "node_123")
+    workspaces.configure(tmp_path, "workspace_123")
     monkeypatch.setenv("SPAREPARTS_READ_KEY", "read_secret")
     path = tmp_path / ".sp/huddles/001-alpha/huddle.md"
     path.parent.mkdir(parents=True)
     path.write_text("# Local edits\n")
-    monkeypatch.setattr(nodes, "_fetch_huddles", lambda *args: [
+    monkeypatch.setattr(workspaces, "_fetch_huddles", lambda *args: [
         {"huddle_id": "001-alpha", "content": "# Remote\n"}
     ])
 
-    assert nodes.pull_huddles(tmp_path)[0]["action"] == "skipped"
+    assert workspaces.pull_huddles(tmp_path)[0]["action"] == "skipped"
     assert path.read_text() == "# Local edits\n"
-    assert nodes.pull_huddles(tmp_path, force=True)[0]["action"] == "updated"
+    assert workspaces.pull_huddles(tmp_path, force=True)[0]["action"] == "updated"
     assert path.read_text() == "# Remote\n"
 
 
 def test_pull_huddles_rejects_unsafe_ids(tmp_path, monkeypatch):
-    nodes.configure(tmp_path, "node_123")
+    workspaces.configure(tmp_path, "workspace_123")
     monkeypatch.setenv("SPAREPARTS_READ_KEY", "read_secret")
-    monkeypatch.setattr(nodes, "_fetch_huddles", lambda *args: [
+    monkeypatch.setattr(workspaces, "_fetch_huddles", lambda *args: [
         {"huddle_id": "../../escape", "content": "bad"}
     ])
 
     try:
-        nodes.pull_huddles(tmp_path)
-    except nodes.NodeSyncError as error:
+        workspaces.pull_huddles(tmp_path)
+    except workspaces.WorkspaceSyncError as error:
         assert "invalid huddle_id" in str(error)
     else:
         raise AssertionError("unsafe huddle ID was accepted")

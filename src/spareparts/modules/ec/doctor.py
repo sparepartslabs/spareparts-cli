@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from spareparts.modules.ec import nodes, projects
+from spareparts.modules.ec import projects, workspaces
 
 
 @dataclass(frozen=True)
@@ -43,13 +43,13 @@ def linear_mcp_files(root: Path, home: Path | None = None) -> list[Path]:
 def checks(root: Path) -> list[Check]:
     results: list[Check] = []
 
-    node = nodes.find_config(root)
-    if node is None:
-        results.append(Check("Spare Parts node", "missing", "No API node configured.", "Run: sp ec node configure --node NODE_ID"))
+    workspace = workspaces.find_config(root)
+    if workspace is None:
+        results.append(Check("Spare Parts workspace", "missing", "No API workspace configured.", "Run: sp ec workspace configure --workspace WORKSPACE_ID"))
     elif os.environ.get("SPAREPARTS_INGEST_KEY"):
-        results.append(Check("Spare Parts node", "ready", f"Node: {node[1]['node_id']}"))
+        results.append(Check("Spare Parts workspace", "ready", f"Workspace: {workspace[1]['workspace_id']}"))
     else:
-        results.append(Check("Spare Parts node", "blocked", f"Node: {node[1]['node_id']}; ingest key missing.", "Set SPAREPARTS_INGEST_KEY."))
+        results.append(Check("Spare Parts workspace", "blocked", f"Workspace: {workspace[1]['workspace_id']}; ingest key missing.", "Set SPAREPARTS_INGEST_KEY."))
 
     git_name = subprocess.run(
         ["git", "config", "--get", "user.name"], cwd=root, capture_output=True, text=True, check=False
