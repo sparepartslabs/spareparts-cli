@@ -41,7 +41,7 @@ def test_payload_captures_git_actor_and_trajectory(tmp_path, monkeypatch):
     huddle.write_text(
         "# Huddle: Food\n\n| Repo | Role | Spec | Stage |\n"
         "|---|---|---|---|\n"
-        "| repo | API | specs/001-food/spec.md | implemented |\n"
+        "| `repo` (`api`) | API | `specs/001-food` | implemented |\n"
     )
 
     answers = {
