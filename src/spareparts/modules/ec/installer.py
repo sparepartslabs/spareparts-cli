@@ -3,7 +3,7 @@
 The packaged command bodies are spec-driven-development
 slash-commands adapted from GitHub's spec-kit (https://github.com/github/spec-kit).
 At install time we render each agent-agnostic body into the conventional command
-file for whichever agentic coding tool the user runs (Claude Code, Cursor, GitHub Copilot, Gemini
+file for whichever agentic coding tool the user runs (Claude Code, Codex, Cursor, GitHub Copilot, Gemini
 CLI, OpenCode), and drop a shared ``.sp/`` working area (scripts +
 templates) that those commands drive.
 """
@@ -22,7 +22,7 @@ from pathlib import Path
 class AgentSpec:
     dir: str  # command directory relative to repo root
     ext: str  # command filename suffix
-    fmt: str  # "md" or "toml"
+    fmt: str  # "md", "toml", or "skill"
     arg: str  # token the user's argument text is substituted with
     markers: tuple[str, ...]  # paths whose presence means "this tool is used here"
 
@@ -32,6 +32,10 @@ class AgentSpec:
 # copilot-instructions file — so plain CI repos aren't misclassified.
 AGENTS: dict[str, AgentSpec] = {
     "claude": AgentSpec(".claude/commands", ".md", "md", "$ARGUMENTS", (".claude",)),
+    "codex": AgentSpec(
+        ".agents/skills", "/SKILL.md", "skill", "the user request that invoked this skill",
+        ("AGENTS.md", ".agents", ".codex"),
+    ),
     "cursor": AgentSpec(".cursor/commands", ".md", "md", "$ARGUMENTS", (".cursor",)),
     "copilot": AgentSpec(
         ".github/prompts", ".prompt.md", "md", "$ARGUMENTS",
@@ -105,11 +109,14 @@ def _render_body(body: str, sh_script: str, arg_token: str) -> str:
     return _rewrite_paths(body)
 
 
-def _wrap(fmt: str, description: str, body: str) -> str:
+def _wrap(fmt: str, name: str, description: str, body: str) -> str:
     if fmt == "toml":
         desc = description.replace("\\", "\\\\").replace('"', '\\"')
         prompt = body.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
         return f'description = "{desc}"\n\nprompt = """\n{prompt}\n"""\n'
+    if fmt == "skill":
+        safe_description = description.replace("\n", " ").replace(chr(34), "\\\"")
+        return f"---\nname: {name}\ndescription: \"{safe_description}\"\n---\n\n{body}"
     if description:
         return f"---\ndescription: {description}\n---\n\n{body}"
     return body
@@ -130,7 +137,7 @@ def render(command: str, agent: str, package: str = _COMMANDS_PKG) -> str:
     if scripts_m:
         sh_script = _frontmatter_value(fm[scripts_m.end() :], "sh")
     body = _render_body(body, sh_script, spec.arg)
-    return _wrap(spec.fmt, description, body)
+    return _wrap(spec.fmt, command, description, body)
 
 
 # --- scaffold (shared .sp working area) ----------------------------------

@@ -57,6 +57,31 @@ def test_render_rewrites_spec_kit_paths_and_references():
     assert "__SPECKIT_COMMAND" not in rendered
 
 
+def test_install_codex_skills(tmp_path):
+    repo = _repo(tmp_path, "repo", claude=False)
+    (repo / "AGENTS.md").write_text("# Repository instructions\n", encoding="utf-8")
+
+    assert main(["ec", "install", "--dir", str(repo)]) == 0
+
+    skill = repo / ".agents/skills/plan/SKILL.md"
+    assert skill.exists()
+    rendered = skill.read_text(encoding="utf-8")
+    assert rendered.startswith("---\nname: plan\ndescription:")
+    assert "the user request that invoked this skill" in rendered
+    assert "$ARGUMENTS" not in rendered
+    assert (repo / ".sp/memory/constitution.md").exists()
+
+
+def test_workspace_install_adds_codex_huddle_skill(tmp_path):
+    first = _repo(tmp_path, "first", claude=False)
+    (tmp_path / ".codex").mkdir()
+
+    assert main(["ec", "install", "--dir", str(tmp_path)]) == 0
+
+    assert (first / ".agents/skills/plan/SKILL.md").exists()
+    assert (tmp_path / ".agents/skills/huddle/SKILL.md").exists()
+
+
 def test_install_warns_when_blanket_rule_hides_constitution(tmp_path, capsys):
     repo = _repo(tmp_path, "repo")
     (repo / ".gitignore").write_text(".sp/\n", encoding="utf-8")
