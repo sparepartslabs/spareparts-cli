@@ -78,7 +78,7 @@ jobs:
 
       - name: Check the distribution
         run: |
-          pip install twine
+          pip install twine pytest
           twine check dist/*
           pytest -q tests/test_distribution.py
 
