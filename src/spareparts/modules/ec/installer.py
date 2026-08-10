@@ -122,14 +122,9 @@ def _wrap(fmt: str, name: str, description: str, body: str) -> str:
     return body
 
 
-def render(command: str, agent: str, package: str = _COMMANDS_PKG) -> str:
-    """Render one packaged command body into ``agent``'s command-file format."""
+def render_source(command: str, agent: str, raw: str) -> str:
+    """Render an agent-neutral command source through a supported adapter."""
     spec = AGENTS[agent]
-    raw = (
-        resources.files(package)
-        .joinpath(f"{command}.md")
-        .read_text(encoding="utf-8")
-    )
     fm, body = _split_frontmatter(raw)
     description = _frontmatter_value(fm, "description")
     sh_script = ""
@@ -138,6 +133,12 @@ def render(command: str, agent: str, package: str = _COMMANDS_PKG) -> str:
         sh_script = _frontmatter_value(fm[scripts_m.end() :], "sh")
     body = _render_body(body, sh_script, spec.arg)
     return _wrap(spec.fmt, command, description, body)
+
+
+def render(command: str, agent: str, package: str = _COMMANDS_PKG) -> str:
+    """Render one packaged command body into ``agent``'s command-file format."""
+    raw = resources.files(package).joinpath(f"{command}.md").read_text(encoding="utf-8")
+    return render_source(command, agent, raw)
 
 
 # --- scaffold (shared .sp working area) ----------------------------------
@@ -227,6 +228,21 @@ def install_commands(
         for command in commands:
             target = dest_dir / spec.dir / f"{command}{spec.ext}"
             _write(target, render(command, agent), force, written, skipped)
+        results.append((agent, written, skipped))
+    return results
+
+
+def install_command_source(
+    dest_dir: Path, command: str, raw: str, agents: list[str], force: bool
+) -> list[InstallResult]:
+    """Render and install one external agent-neutral command source."""
+    results: list[InstallResult] = []
+    for agent in agents:
+        spec = AGENTS[agent]
+        target = dest_dir / spec.dir / f"{command}{spec.ext}"
+        written: list[str] = []
+        skipped: list[str] = []
+        _write(target, render_source(command, agent, raw), force, written, skipped)
         results.append((agent, written, skipped))
     return results
 

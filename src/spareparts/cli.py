@@ -41,6 +41,11 @@ MODULES: tuple[Module, ...] = (
         summary="Prove you read a diff before you merge it",
         package="spareparts.modules.lgtm",
     ),
+    Module(
+        name="plugin",
+        summary="Discover and install Spare Parts plugins for Codex",
+        package="spareparts.modules.plugin",
+    ),
 )
 
 _INDEX = {m.name: m for m in MODULES}

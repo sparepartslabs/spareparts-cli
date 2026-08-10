@@ -13,6 +13,7 @@ sp
 |---|---|
 | `sp ec` | Install engineering-context commands for coding agents |
 | `sp lgtm` | Prove you read a diff before you merge it |
+| `sp plugin` | Discover and install Spare Parts plugins for Codex |
 
 ---
 
@@ -122,6 +123,41 @@ steps:
 
 The local Markdown remains authoritative if synchronization fails. Repeated
 sync and reconciliation calls are idempotent.
+
+---
+
+## `sp plugin`
+
+Lists and installs the immutable plugin versions pinned by this `sp` release:
+
+```sh
+sp plugin list
+sp plugin install lgtm
+sp plugin install lgtm --refresh
+sp plugin install lgtm --agent claude --dir path/to/repo
+sp plugin install lgtm --agent cursor --agent gemini
+sp plugin install lgtm --all --dir path/to/repo
+```
+
+Installation downloads the official marketplace archive, verifies its pinned
+SHA-256 digest, registers the verified local marketplace with Codex, and adds
+`lgtm@sparepartslabs`. Start a new Codex session afterward so the plugin is
+available. Repeating the command is safe and reports `unchanged`; `--refresh`
+downloads and validates the same pinned version again rather than selecting an
+unpinned newer release.
+
+This installs the Codex agent skill only. It does not install a Git hook, edit
+Codex memory, or change an existing preference. The separate
+`sp lgtm install` command manages the optional local Git hook.
+
+With no `--agent` or `--all`, installation uses Codex's marketplace and plugin
+commands as described above. Explicit targets instead install the producer's
+canonical native LGTM command into the selected project for any agent supported
+by `sp ec install`: `claude`, `codex`, `cursor`, `copilot`, `gemini`, or
+`opencode`. Repeat `--agent` to select several, or use `--all`; the two forms
+are mutually exclusive. Existing native files are preserved unless `--force`
+is passed. In explicit Codex mode the only target is
+`.agents/skills/lgtm/SKILL.md`; it does not register the marketplace.
 
 ---
 

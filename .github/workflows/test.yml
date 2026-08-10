@@ -57,6 +57,9 @@ jobs:
           fi
           sp --help
           sp lgtm --help
+          sp plugin --help
+          sp plugin install --help
+          sp plugin list
 
   build:
     name: build the wheel and check its contents
@@ -77,6 +80,7 @@ jobs:
         run: |
           pip install twine
           twine check dist/*
+          pytest -q tests/test_distribution.py
 
       # The prompt files are data, not code, and a packaging change that drops
       # them leaves a CLI that imports fine and then cannot generate anything.
