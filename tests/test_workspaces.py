@@ -69,6 +69,16 @@ def test_payload_captures_git_actor_and_trajectory(tmp_path, monkeypatch):
     assert body["git"]["dirty"] is False
 
 
+def test_huddle_status_uses_the_leading_canonical_token(tmp_path):
+    artifact = tmp_path / ".sp/huddles/003-board/huddle.md"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("# Huddle: Board\n\n**Status**: complete (merged 2026-08-09)\n")
+
+    _, body = workspaces.payload(artifact, tmp_path, event="synced")
+
+    assert body["status"] == "complete"
+
+
 def test_payload_caps_status_to_api_limit(tmp_path):
     artifact = tmp_path / "specs/001-food/spec.md"
     artifact.parent.mkdir(parents=True)

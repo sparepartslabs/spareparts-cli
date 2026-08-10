@@ -122,7 +122,11 @@ def _title(content: str, path: Path) -> str:
 
 def _status(content: str) -> str | None:
     match = re.search(r"^\*\*Status\*\*:\s*(.+)$", content, re.MULTILINE | re.IGNORECASE)
-    return match.group(1).strip()[:_STATUS_MAX_LENGTH] if match else None
+    if not match:
+        return None
+    value = match.group(1).strip()
+    canonical = value.split(maxsplit=1)[0].lower()
+    return canonical if canonical in {"active", "blocked", "complete"} else value[:_STATUS_MAX_LENGTH]
 
 
 def _linked_huddle(path: Path, root: Path) -> str | None:
