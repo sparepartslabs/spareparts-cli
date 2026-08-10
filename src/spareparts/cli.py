@@ -43,7 +43,7 @@ MODULES: tuple[Module, ...] = (
     ),
     Module(
         name="plugin",
-        summary="Discover and install Spare Parts plugins for Codex",
+        summary="Discover and install Spare Parts agent plugins",
         package="spareparts.modules.plugin",
     ),
 )

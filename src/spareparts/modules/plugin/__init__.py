@@ -1,4 +1,4 @@
-"""Commands for discovering and installing curated Codex plugins."""
+"""Commands for discovering and installing curated agent plugins."""
 from __future__ import annotations
 import argparse, sys
 from pathlib import Path
