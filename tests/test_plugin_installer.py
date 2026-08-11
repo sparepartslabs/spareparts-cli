@@ -21,6 +21,16 @@ def test_clean_repeat_refresh_and_new_version(tmp_path):
     newer=archive_bytes(root="marketplace-1.2.4",version="1.2.4"); newer_entry=fixture_entry(newer,root="marketplace-1.2.4",version="1.2.4")
     assert install(newer_entry, root=tmp_path, downloader=downloader(newer), codex="codex", runner=ok).outcome == "refreshed"
 
+def test_legacy_root_manifest_is_normalized_for_codex(tmp_path):
+    current=archive_bytes(); legacy=io.BytesIO()
+    with tarfile.open(fileobj=io.BytesIO(current),mode="r:gz") as source, tarfile.open(fileobj=legacy,mode="w:gz") as target:
+        for member in source.getmembers():
+            member.name=member.name.replace("/.agents/plugins/marketplace.json", "/marketplace.json")
+            target.addfile(member, source.extractfile(member) if member.isfile() else None)
+    data=legacy.getvalue(); entry=fixture_entry(data)
+    result=install(entry,root=tmp_path,downloader=downloader(data),codex="codex",runner=ok)
+    assert (result.marketplace_root/".agents/plugins/marketplace.json").is_file()
+
 def test_digest_failure_preserves_receipt(tmp_path):
     data=archive_bytes(); entry=fixture_entry(data); install(entry,root=tmp_path,downloader=downloader(data),codex="codex",runner=ok)
     receipt=tmp_path/"receipts/lgtm.json"; before=receipt.read_bytes()
