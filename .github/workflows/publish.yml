@@ -91,9 +91,40 @@ jobs:
           # a shallow clone cannot see.
           fetch-depth: 0
 
-      # --generate-notes writes them from the pull requests merged since that
-      # tag, so there is no changelog to maintain by hand and no second place
-      # for the history to be wrong.
+      - name: Resolve release range
+        id: release-range
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: scripts/release-range.sh "$TAG" "$GITHUB_OUTPUT"
+
+      # Public commit subjects and bodies from the release range are sent to
+      # Anthropic for customer-facing copy. Custom instructions are optional,
+      # untrusted editorial guidance; the Action keeps evidence rules dominant.
+      - name: Render end-user release notes
+        id: changelog
+        uses: sparepartslabs/spareparts-changelog@v0
+        with:
+          provider: anthropic
+          instructions: ${{ vars.CHANGELOG_INSTRUCTIONS }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          from: ${{ steps.release-range.outputs.from }}
+          to: ${{ steps.release-range.outputs.to }}
+          title: ${{ inputs.tag || github.ref_name }}
+          write-repository: "false"
+          publish-s3: "false"
+          publish-linkedin: "false"
+
+      - name: Write canonical release notes
+        env:
+          RELEASE_NOTES: ${{ steps.changelog.outputs.markdown }}
+        run: |
+          test -n "$RELEASE_NOTES"
+          printf '%s\n' "$RELEASE_NOTES" > release-notes.md
+
+      # The changelog Action renders normalized Conventional Commit evidence
+      # through Anthropic into the notes file above. Keeping the AI call in this
+      # separately permissioned job means the PyPI identity job never receives
+      # the provider credential.
       #
       # The sdist and wheel are deliberately not attached: PyPI already serves
       # them, and a second copy is one more thing that can disagree.
@@ -103,4 +134,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
-        run: gh release create "$TAG" --generate-notes --verify-tag
+        run: gh release create "$TAG" --notes-file release-notes.md --verify-tag
