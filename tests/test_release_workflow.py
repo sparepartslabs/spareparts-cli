@@ -67,7 +67,7 @@ def test_release_range_rejects_invalid_or_empty_tags(tmp_path: Path) -> None:
         resolve_range(repo, "v0.1.0")
 
 
-def test_release_workflow_is_anthropic_only_and_render_only() -> None:
+def test_release_workflow_is_anthropic_only_and_publishes_canonical_s3_markdown() -> None:
     source = WORKFLOW.read_text()
     assert "uses: sparepartslabs/spareparts-changelog@v0" in source
     assert "provider: anthropic" in source
@@ -75,7 +75,14 @@ def test_release_workflow_is_anthropic_only_and_render_only() -> None:
     assert "anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}" in source
     assert "openai-api-key" not in source and "gemini-api-key" not in source
     assert 'write-repository: "false"' in source
-    assert 'publish-s3: "false"' in source
+    assert "id-token: write" in source
+    assert "uses: aws-actions/configure-aws-credentials@v5" in source
+    assert "role-to-assume: ${{ vars.CHANGELOG_AWS_ROLE_ARN }}" in source
+    assert "aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}" in source
+    assert 'publish-s3: "true"' in source
+    assert "s3-bucket: ${{ vars.CHANGELOG_S3_BUCKET }}" in source
+    assert "s3-key: releases/spareparts-cli/${{ steps.changelog-object.outputs.version }}.md" in source
+    assert "version=${TAG#v}" in source
     assert 'publish-linkedin: "false"' in source
     assert "--notes-file release-notes.md --verify-tag" in source
     assert "--generate-notes" not in source
