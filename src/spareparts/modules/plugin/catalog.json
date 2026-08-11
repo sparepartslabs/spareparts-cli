@@ -5,7 +5,7 @@
       "marketplace": "sparepartslabs",
       "version": "1.1.0",
       "archive_url": "https://github.com/sparepartslabs/spareparts-lgtm/releases/download/v1.1.0/sparepartslabs-lgtm-marketplace-1.1.0.tar.gz",
-      "sha256": "25ddcaba4410590c2abb74e835b4c7468e0cf700c2cf917cfbce2b1eba792faf",
+      "sha256": "78acc1215b87460f28ac27ea0b886d5dfaf89fd8041b3977f12e172bb568d346",
       "archive_root": "sparepartslabs-lgtm-marketplace-1.1.0",
       "install_identity": "lgtm@sparepartslabs"
     }
