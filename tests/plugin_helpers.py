@@ -5,7 +5,7 @@ from spareparts.modules.plugin.catalog import PluginEntry
 
 def archive_bytes(*, root="marketplace-1.2.3", version="1.2.3", extra=None) -> bytes:
     content = {
-        f"{root}/marketplace.json": json.dumps({"name":"sparepartslabs","plugins":[{"name":"lgtm","source":{"source":"local","path":"./plugins/lgtm"}}]}).encode(),
+        f"{root}/.agents/plugins/marketplace.json": json.dumps({"name":"sparepartslabs","plugins":[{"name":"lgtm","source":{"source":"local","path":"./plugins/lgtm"}}]}).encode(),
         f"{root}/plugins/lgtm/.codex-plugin/plugin.json": json.dumps({"name":"lgtm","version":version}).encode(),
         f"{root}/plugins/lgtm/skills/lgtm/SKILL.md": b"---\nname: lgtm\ndescription: Review changes\n---\nRun LGTM.\n",
         f"{root}/plugins/lgtm/commands/lgtm.md": b"---\ndescription: Run LGTM\n---\n\nReview $ARGUMENTS with LGTM.\n",

@@ -65,8 +65,15 @@ def _read_json(path: Path, phase: str) -> dict:
     if not isinstance(value, dict): raise InstallError(phase, f"{path.name} must contain an object")
     return value
 
+def _normalize_marketplace_manifest(root: Path) -> None:
+    manifest = root/".agents"/"plugins"/"marketplace.json"
+    legacy = root/"marketplace.json"
+    if manifest.exists() or not legacy.exists(): return
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(legacy, manifest)
+
 def _validate_manifests(root: Path, entry: PluginEntry) -> None:
-    marketplace = _read_json(root/"marketplace.json", "archive")
+    marketplace = _read_json(root/".agents"/"plugins"/"marketplace.json", "archive")
     if marketplace.get("name") != entry.marketplace: raise InstallError("archive", "marketplace identity does not match")
     plugins = marketplace.get("plugins")
     expected_source = {"source": "local", "path": f"./plugins/{entry.name}"}
@@ -83,6 +90,7 @@ def _validate_manifests(root: Path, entry: PluginEntry) -> None:
 
 def _activate(archive_path: Path, entry: PluginEntry, base: Path) -> Path:
     versions = base/"versions"; target = versions/f"{entry.marketplace}-{entry.version}-{entry.sha256[:12]}"
+    if target.exists(): _normalize_marketplace_manifest(target)
     if target.exists(): _validate_manifests(target, entry); return target
     try:
         versions.mkdir(parents=True, exist_ok=True); staging = Path(tempfile.mkdtemp(prefix=".staging-", dir=versions))
@@ -98,6 +106,7 @@ def _activate(archive_path: Path, entry: PluginEntry, base: Path) -> Path:
                     source = archive.extractfile(member)
                     if source is None: raise InstallError("archive", f"could not read {member.name}")
                     with source, destination.open("xb") as output: shutil.copyfileobj(source, output)
+            _normalize_marketplace_manifest(staging/entry.archive_root)
             extracted = staging/entry.archive_root; _validate_manifests(extracted, entry)
             try: extracted.replace(target)
             except FileExistsError: _validate_manifests(target, entry)
