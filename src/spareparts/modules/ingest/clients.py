@@ -91,12 +91,19 @@ class GitHubClient:
         login = viewer.get("login") if isinstance(viewer, dict) else None
         if not isinstance(login, str) or not login:
             raise IngestionError("GitHub returned no authenticated login")
-        comments = self._get(base + f"/issues/{issue_number}/comments", {"per_page": 100})
-        if not isinstance(comments, list):
-            raise IngestionError("GitHub comments response was not an array")
+        comments: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            values = self._get(base + f"/issues/{issue_number}/comments", {"per_page": 100, "page": page})
+            if not isinstance(values, list):
+                raise IngestionError("GitHub comments response was not an array")
+            comments.extend(item for item in values if isinstance(item, dict))
+            if len(values) < 100:
+                break
+            page += 1
         for comment in comments:
             author = comment.get("user", {}).get("login") if isinstance(comment, dict) else None
-            if author == login and marker in str(comment.get("body", "")) and comment.get("id"):
+            if isinstance(author, str) and author.casefold() == login.casefold() and marker in str(comment.get("body", "")) and comment.get("id"):
                 value = self._request("PATCH", base + f"/issues/comments/{comment['id' ]}", {"body": body})
                 return {"action": "updated", "comment_id": value.get("id"), "url": value.get("html_url")}
         value = self._request("POST", base + f"/issues/{issue_number}/comments", {"body": body})
