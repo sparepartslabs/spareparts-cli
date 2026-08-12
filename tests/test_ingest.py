@@ -6,7 +6,7 @@ import pytest
 from spareparts.cli import main
 from spareparts.modules.ingest.clients import CoreClient, GitHubClient
 from spareparts.modules.ingest.models import IngestionError, IssueEvent, validate_routes
-from spareparts.modules.ingest.service import ROUTING_SCHEMA, ingest_issue, top_approver
+from spareparts.modules.ingest.service import ROUTING_SCHEMA, ingest_issue, render_summary, top_approver, writeback_marker
 
 
 @pytest.fixture
@@ -44,10 +44,17 @@ class GitHub:
         self.reviews = reviews or []
         self.failure = failure
         self.catalog_calls = 0
+        self.writebacks = []
 
     def repositories(self, organization, limit):
         self.catalog_calls += 1
         return [{"repository_id": "R_core", "name": "core", "name_with_owner": "sparepartslabs/core", "description": "Core", "visibility": "public", "lifecycle_state": "active", "is_archived": False, "relationships": [], "metadata": {"topics": [], "language": "Python"}, "source_url": "https://github.com/sparepartslabs/core"}]
+
+    def upsert_issue_summary(self, full_name, issue_number, marker, body):
+        self.writebacks.append((full_name, issue_number, marker, body))
+        if self.failure == "writeback":
+            raise IngestionError("GitHub API returned HTTP 403")
+        return {"action": "created", "comment_id": 9, "url": "https://example/comment/9"}
 
     def approved_reviews(self, full_name):
         if self.failure:
@@ -197,3 +204,74 @@ def test_core_client_contract_headers_and_paths():
     assert requests[0].get_header("X-api-key") == "core-token"
     assert requests[0].get_header("Authorization") is None
     assert "/ingestion/v1/ontology-context?" in requests[0].full_url
+
+
+def test_writeback_is_opt_in_and_happens_after_core_persistence(event):
+    github = GitHub()
+    core = Core(ontology())
+    result = ingest_issue(event, Provider(), github, core, writeback=True)
+    assert core.submitted is not None
+    assert result["writeback"]["action"] == "created"
+    assert github.writebacks[0][0:2] == ("sparepartslabs/distributor", 42)
+    assert writeback_marker(event.source_id) in github.writebacks[0][3]
+
+
+def test_ingestion_without_writeback_does_not_mutate_issue(event):
+    github = GitHub()
+    ingest_issue(event, Provider(), github, Core(ontology()))
+    assert github.writebacks == []
+
+
+def test_summary_contains_routes_and_safe_reviewer_evidence(event):
+    routes = [{"full_name": "sparepartslabs/core", "confidence": 0.91, "rationale": "Owns the API", "reviewer": {"login": "ike", "approval_count": 3, "observed_at": "now"}}]
+    summary = render_summary("accepted", "anthropic:claude-opus-5", "ing-1", routes, event.source_id)
+    assert "sparepartslabs/core" in summary
+    assert "91% confidence" in summary
+    assert "Owns the API" in summary
+    assert "ike" in summary and "3 approved reviews" in summary
+    assert "delivery-1" not in summary
+    assert writeback_marker(event.source_id) in summary
+
+
+def test_summary_explicitly_reports_empty_routing(event):
+    summary = render_summary("accepted", "openai:gpt-5.5", "ing-1", [], event.source_id)
+    assert "No affected repositories" in summary
+
+
+def test_writeback_failure_reports_persisted_ingestion(event):
+    with pytest.raises(IngestionError, match="ingestion ing-1 persisted but issue writeback failed"):
+        ingest_issue(event, Provider(), GitHub(failure="writeback"), Core(ontology()), writeback=True)
+
+
+def test_github_writeback_updates_only_own_marked_comment():
+    requests = []
+    marker = writeback_marker("delivery-1")
+    def transport(request):
+        requests.append(request)
+        if request.full_url.endswith("/user"):
+            return 200, {"login": "github-actions[bot]"}
+        if "/comments?" in request.full_url:
+            return 200, [
+                {"id": 1, "body": marker, "user": {"login": "someone"}},
+                {"id": 2, "body": marker, "user": {"login": "github-actions[bot]"}},
+            ]
+        return 200, {"id": 2, "html_url": "https://example/2"}
+    result = GitHubClient("token", transport).upsert_issue_summary("org/repo", 42, marker, "new body")
+    assert result["action"] == "updated"
+    assert requests[-1].method == "PATCH"
+    assert requests[-1].full_url.endswith("/repos/org/repo/issues/comments/2")
+    assert json.loads(requests[-1].data) == {"body": "new body"}
+
+
+def test_github_writeback_creates_when_no_owned_marker_exists():
+    requests = []
+    def transport(request):
+        requests.append(request)
+        if request.full_url.endswith("/user"):
+            return 200, {"login": "bot"}
+        if "/comments?" in request.full_url:
+            return 200, []
+        return 201, {"id": 3, "html_url": "https://example/3"}
+    result = GitHubClient("token", transport).upsert_issue_summary("org/repo", 42, "marker", "body")
+    assert result["action"] == "created"
+    assert requests[-1].method == "POST"
