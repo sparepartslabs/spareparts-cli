@@ -12,6 +12,7 @@ sp
 | Module | What it does |
 |---|---|
 | `sp ec` | Install engineering-context commands for coding agents |
+| `sp ingest` | Enrich GitHub issue events into Core ingestion records |
 | `sp lgtm` | Prove you read a diff before you merge it |
 | `sp plugin` | Discover and install Spare Parts agent plugins |
 
@@ -123,6 +124,32 @@ steps:
 
 The local Markdown remains authoritative if synchronization fails. Repeated
 sync and reconciliation calls are idempotent.
+
+---
+
+## `sp ingest`
+
+Processes one GitHub `issues` event file, builds or reuses the organization's
+repository ontology, asks one configured model which catalog repositories are
+affected, gathers bounded pull-request approval evidence, and submits the safe,
+idempotent result to Core:
+
+```sh
+export GITHUB_TOKEN=...
+export SPAREPARTS_INGEST_KEY=...
+export OPENAI_API_KEY=... # or ANTHROPIC_API_KEY / GEMINI_API_KEY
+
+sp ingest issue "$GITHUB_EVENT_PATH" \
+  --provider openai:gpt-5.5 \
+  --core-url "$SP_CORE_URL" \
+  --delivery-id "$GITHUB_DELIVERY_ID"
+```
+
+`--model` overrides the model in `vendor:model`. Exactly one provider is used.
+Model, GitHub, and Core ingest keys are read from runtime environment variables only;
+they are never written to configuration, stdout, or Core records. The command
+only reads GitHub and submits ingestion evidence. It does not assign users,
+change issues, start builds, or update Project fields.
 
 ---
 

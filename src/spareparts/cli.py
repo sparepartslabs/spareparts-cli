@@ -37,6 +37,11 @@ MODULES: tuple[Module, ...] = (
         package="spareparts.modules.ec",
     ),
     Module(
+        name="ingest",
+        summary="Enrich GitHub issue events for Spare Parts Core",
+        package="spareparts.modules.ingest",
+    ),
+    Module(
         name="lgtm",
         summary="Prove you read a diff before you merge it",
         package="spareparts.modules.lgtm",
