@@ -142,14 +142,17 @@ export OPENAI_API_KEY=... # or ANTHROPIC_API_KEY / GEMINI_API_KEY
 sp ingest issue "$GITHUB_EVENT_PATH" \
   --provider openai:gpt-5.5 \
   --core-url "$SP_CORE_URL" \
-  --delivery-id "$GITHUB_DELIVERY_ID"
+  --delivery-id "$GITHUB_DELIVERY_ID" \
+  --writeback
 ```
 
-`--model` overrides the model in `vendor:model`. Exactly one provider is used.
+`--model` overrides the model in `vendor:model`. `--writeback` posts an idempotent
+processing summary to the source issue only after Core accepts the ingestion record; it is
+off by default and requires a GitHub token with issue-write permission. Exactly one provider is used.
 Model, GitHub, and Core ingest keys are read from runtime environment variables only;
-they are never written to configuration, stdout, or Core records. The command
-only reads GitHub and submits ingestion evidence. It does not assign users,
-change issues, start builds, or update Project fields.
+they are never written to configuration, stdout, or Core records. Without `--writeback`, the command only reads GitHub and submits ingestion evidence.
+With it, the sole GitHub mutation is the managed summary comment; the command never
+assigns users, edits issue content, starts builds, or updates Project fields.
 
 ---
 

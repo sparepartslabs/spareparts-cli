@@ -47,6 +47,17 @@ class GitHubClient:
             raise IngestionError(f"GitHub API returned HTTP {status} for {path}")
         return body
 
+    def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
+        data = json.dumps(body, separators=(",", ":")).encode() if body is not None else None
+        request = urllib.request.Request(
+            "https://api.github.com" + path, method=method, data=data,
+            headers={"Authorization": f"Bearer {self.token}", "Accept": "application/vnd.github+json", "Content-Type": "application/json", "X-GitHub-Api-Version": "2022-11-28"},
+        )
+        status, value = self.transport(request)
+        if status < 200 or status >= 300:
+            raise IngestionError(f"GitHub API returned HTTP {status} for {path}")
+        return value
+
     def repositories(self, organization: str, limit: int) -> list[dict[str, Any]]:
         values = self._get(f"/orgs/{urllib.parse.quote(organization)}/repos", {"per_page": limit, "sort": "full_name"})
         if not isinstance(values, list):
@@ -72,6 +83,31 @@ class GitHubClient:
                 "language": value.get("language"),
             },
         }
+
+    def upsert_issue_summary(self, full_name: str, issue_number: int, marker: str, body: str) -> dict[str, Any]:
+        owner, repo = full_name.split("/", 1)
+        base = f"/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}"
+        viewer = self._request("GET", "/user")
+        login = viewer.get("login") if isinstance(viewer, dict) else None
+        if not isinstance(login, str) or not login:
+            raise IngestionError("GitHub returned no authenticated login")
+        comments: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            values = self._get(base + f"/issues/{issue_number}/comments", {"per_page": 100, "page": page})
+            if not isinstance(values, list):
+                raise IngestionError("GitHub comments response was not an array")
+            comments.extend(item for item in values if isinstance(item, dict))
+            if len(values) < 100:
+                break
+            page += 1
+        for comment in comments:
+            author = comment.get("user", {}).get("login") if isinstance(comment, dict) else None
+            if isinstance(author, str) and author.casefold() == login.casefold() and marker in str(comment.get("body", "")) and comment.get("id"):
+                value = self._request("PATCH", base + f"/issues/comments/{comment['id' ]}", {"body": body})
+                return {"action": "updated", "comment_id": value.get("id"), "url": value.get("html_url")}
+        value = self._request("POST", base + f"/issues/{issue_number}/comments", {"body": body})
+        return {"action": "created", "comment_id": value.get("id"), "url": value.get("html_url")}
 
     def approved_reviews(self, full_name: str, max_pulls: int = 100, max_reviews: int = 100) -> list[dict[str, Any]]:
         owner, repo = full_name.split("/", 1)

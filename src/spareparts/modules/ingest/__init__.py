@@ -24,6 +24,7 @@ def register(parser: argparse.ArgumentParser) -> None:
     issue.add_argument("--core-url", default=os.environ.get("SP_CORE_URL"))
     issue.add_argument("--delivery-id", default=os.environ.get("GITHUB_DELIVERY_ID"))
     issue.add_argument("--refresh-ontology", action="store_true")
+    issue.add_argument("--writeback", action="store_true", help="write an idempotent processing summary to the source issue")
     issue.add_argument("--max-repositories", type=int, default=100, choices=range(1, 101), metavar="1..100")
 
 
@@ -37,7 +38,7 @@ def run(args: argparse.Namespace) -> int:
         provider = resolve(args.provider, args.model)
         github = GitHubClient(os.environ.get("GITHUB_TOKEN", ""))
         core = CoreClient(args.core_url or "", os.environ.get("SPAREPARTS_INGEST_KEY", ""))
-        result = ingest_issue(event, provider, github, core, refresh=args.refresh_ontology, max_repositories=args.max_repositories)
+        result = ingest_issue(event, provider, github, core, refresh=args.refresh_ontology, max_repositories=args.max_repositories, writeback=args.writeback)
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     except ProviderError as err:

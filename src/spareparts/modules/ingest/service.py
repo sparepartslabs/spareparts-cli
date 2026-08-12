@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
@@ -66,7 +66,45 @@ def routing_prompt(event: IssueEvent, repositories: list[dict[str, Any]]) -> str
     )
 
 
-def ingest_issue(event: IssueEvent, provider: Any, github: Any, core: Any, *, refresh: bool = False, max_repositories: int = 100) -> dict[str, Any]:
+def writeback_marker(source_id: str) -> str:
+    digest = hashlib.sha256(source_id.encode()).hexdigest()
+    return f"<!-- spareparts:ingestion:{digest} -->"
+
+
+def _summary_text(value: Any, limit: int = 500) -> str:
+    text = " ".join(str(value).split()).replace("@", "@\u200b")
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def render_summary(status: str, provider: str, ingestion_id: str | None, routes: list[dict[str, Any]], source_id: str) -> str:
+    lines = [
+        "## Spare Parts ingestion summary",
+        "",
+        f"**Status:** {status}  ",
+        f"**Provider:** `{provider}`  ",
+        f"**Ingestion ID:** `{ingestion_id or 'unavailable'}`",
+        "",
+    ]
+    if not routes:
+        lines.append("No affected repositories were identified with sufficient evidence.")
+    else:
+        lines.extend([f"### Affected repositories ({len(routes)})", ""])
+        for route in routes:
+            reviewer = route["reviewer"]
+            if reviewer.get("login"):
+                evidence = f"top approver `{reviewer['login']}` ({reviewer['approval_count']} approved reviews)"
+            else:
+                evidence = f"reviewer evidence unavailable (`{reviewer['unavailable_reason']}`)"
+            lines.extend([
+                f"- **`{route['full_name']}`** — {route['confidence']:.0%} confidence",
+                f"  - {_summary_text(route['rationale'])}",
+                f"  - {evidence}",
+            ])
+    lines.extend(["", writeback_marker(source_id)])
+    return "\n".join(lines)
+
+
+def ingest_issue(event: IssueEvent, provider: Any, github: Any, core: Any, *, refresh: bool = False, max_repositories: int = 100, writeback: bool = False) -> dict[str, Any]:
     ontology = None if refresh else core.current_ontology(event.organization, max_repositories)
     if ontology is None:
         observed_at = now()
@@ -88,7 +126,7 @@ def ingest_issue(event: IssueEvent, provider: Any, github: Any, core: Any, *, re
     for route in routes:
         try:
             route["reviewer"] = top_approver(github.approved_reviews(route["full_name"]))
-        except IngestionError as err:
+        except IngestionError:
             partial = True
             route["reviewer"] = {"unavailable_reason": "github_evidence_unavailable"}
     vendor, _, model = provider.label.partition(":")
@@ -101,8 +139,17 @@ def ingest_issue(event: IssueEvent, provider: Any, github: Any, core: Any, *, re
         "model": model, "ontology_revision_id": ontology["revision_id"], "status": status,
         "affected_repositories": routes,
     })
-    return {
+    result = {
         "status": status, "source_id": event.source_id, "provider": provider.label,
         "ontology_revision_id": ontology["revision_id"], "affected_repository_count": len(routes),
         "ingestion_id": response.get("id"),
     }
+    if writeback:
+        try:
+            result["writeback"] = github.upsert_issue_summary(
+                event.repository, event.issue_number, writeback_marker(event.source_id),
+                render_summary(status, provider.label, response.get("id"), routes, event.source_id),
+            )
+        except IngestionError as err:
+            raise IngestionError(f"ingestion {response.get('id') or 'unknown'} persisted but issue writeback failed: {err}") from err
+    return result
