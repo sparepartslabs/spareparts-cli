@@ -32,6 +32,11 @@ class Module:
 
 MODULES: tuple[Module, ...] = (
     Module(
+        name="build",
+        summary="Turn an ingested issue into validated pull requests",
+        package="spareparts.modules.build",
+    ),
+    Module(
         name="ec",
         summary="Install engineering-context commands for coding agents",
         package="spareparts.modules.ec",
