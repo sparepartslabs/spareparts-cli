@@ -11,9 +11,37 @@ sp
 
 | Module | What it does |
 |---|---|
+| `sp build` | Turn an ingested issue into validated pull requests |
 | `sp ec` | Install engineering-context commands for coding agents |
 | `sp lgtm` | Prove you read a diff before you merge it |
 | `sp plugin` | Discover and install Spare Parts agent plugins |
+
+---
+
+## `sp build`
+
+`sp build issue` resolves authoritative affected repositories from Core, applies
+explicit organization/repository allowlists and a fan-out cap, runs Codex or
+Claude in a fresh target checkout, validates the diff, and creates or updates a
+deterministically marked pull request:
+
+```sh
+export SPAREPARTS_INGEST_KEY=...
+export GITHUB_TOKEN=...           # short-lived GitHub App installation token
+export OPENAI_API_KEY=...         # or supported Claude/subscription credential
+
+sp build issue \
+  --source-repository sparepartslabs/spareparts-distributor \
+  --issue-number 42 --trigger-delivery-id "$GITHUB_DELIVERY_ID" \
+  --core-url "$SP_CORE_URL" --agent codex --allowed-org sparepartslabs \
+  --max-fanout 3 --validation-command "python -m pytest"
+```
+
+Credentials are environment-only. The coding agent never commits, pushes, or
+creates PRs; the orchestrator does so only after policy and validation pass.
+Use `--dry-run` to validate Core/GitHub plan authorization without cloning or
+publishing. The runner container/platform must enforce non-root filesystem,
+resource, process, and egress isolation for trusted repositories.
 
 ---
 
