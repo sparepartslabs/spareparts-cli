@@ -6,7 +6,7 @@ import pytest
 from spareparts.cli import main
 from spareparts.modules.ingest.clients import CoreClient, GitHubClient
 from spareparts.modules.ingest.models import IngestionError, IssueEvent, validate_routes
-from spareparts.modules.ingest.service import ingest_issue, top_approver
+from spareparts.modules.ingest.service import ROUTING_SCHEMA, ingest_issue, top_approver
 
 
 @pytest.fixture
@@ -110,6 +110,11 @@ def test_empty_routes_are_valid(event):
     result = ingest_issue(event, Provider(), GitHub(), core)
     assert result["status"] == "accepted"
     assert core.submitted["affected_repositories"] == []
+
+
+def test_routing_schema_uses_anthropic_compatible_number_constraints():
+    confidence = ROUTING_SCHEMA["properties"]["affected_repositories"]["items"]["properties"]["confidence"]
+    assert confidence == {"type": "number"}
 
 
 def test_unknown_repository_is_rejected():

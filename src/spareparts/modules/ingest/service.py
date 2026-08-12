@@ -20,7 +20,7 @@ ROUTING_SCHEMA = {
                 "properties": {
                     "repository_id": {"type": "string"},
                     "rationale": {"type": "string"},
-                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "confidence": {"type": "number"},
                 },
                 "required": ["repository_id", "rationale", "confidence"],
                 "additionalProperties": False,
