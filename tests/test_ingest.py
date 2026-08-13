@@ -6,7 +6,7 @@ import pytest
 from spareparts.cli import main
 from spareparts.modules.ingest.clients import CoreClient, GitHubClient
 from spareparts.modules.ingest.models import IngestionError, IssueEvent, validate_routes
-from spareparts.modules.ingest.service import ROUTING_SCHEMA, ingest_issue, render_summary, top_approver, writeback_marker
+from spareparts.modules.ingest.service import ROUTING_SCHEMA, explicit_routes, ingest_issue, render_summary, top_approver, writeback_marker
 
 
 @pytest.fixture
@@ -79,6 +79,8 @@ class Core:
     def submit(self, body):
         self.submitted = body
         return {"id": "ing-1", "duplicate": False}
+    def search_ontology(self, body):
+        return {"repositories": self.ontology["repositories"] if self.ontology else []}
 
 
 def ontology():
@@ -113,6 +115,7 @@ def test_event_rejects_missing_nested_context(payload):
 
 
 def test_empty_routes_are_valid(event):
+    event = event.__class__(**{**event.__dict__, "body": "Needs investigation"})
     core = Core(ontology())
     result = ingest_issue(event, Provider(), GitHub(), core)
     assert result["status"] == "accepted"
@@ -127,6 +130,74 @@ def test_routing_schema_uses_anthropic_compatible_number_constraints():
 def test_unknown_repository_is_rejected():
     with pytest.raises(IngestionError, match="outside ontology"):
         validate_routes({"affected_repositories": [{"repository_id": "R_bad", "rationale": "guess", "confidence": 0.8}]}, ontology()["repositories"])
+
+def test_issue_7_component_reference_maps_to_parent_repository():
+    repos=[{"id":"R_sp","full_name":"sparepartslabs/spareparts","components":[{"path":"spareparts-www","name":"spareparts-www"}]}]
+    routes=explicit_routes("Please change spareparts/spareparts-www", repos)
+    assert routes == [{"repository_id":"R_sp","full_name":"sparepartslabs/spareparts","rationale":"Explicit reference to sparepartslabs/spareparts component spareparts-www","confidence":1.0,"match_kind":"explicit_component","matched_path":"spareparts-www"}]
+
+def test_unique_bare_repo_matches_but_ambiguous_name_fails_closed():
+    one=[{"id":"1","full_name":"org/widget"}]
+    assert explicit_routes("fix widget", one)[0]["repository_id"] == "1"
+    two=one+[{"id":"2","full_name":"other/widget"}]
+    assert explicit_routes("fix widget", two) == []
+
+def test_explicit_target_survives_empty_model_response(event):
+    ont={"revision_id":"r","complete":True,"repositories":[{"id":"R_core","full_name":"sparepartslabs/core","components":[]}]}
+    changed=event.__class__(**{**event.__dict__,"body":"Update sparepartslabs/core"})
+    core=Core(ont); ingest_issue(changed, Provider(), GitHub(), core)
+    link=core.submitted["affected_repositories"][0]
+    assert link["repository_id"] == "R_core" and link["match_kind"] == "explicit_repository"
+
+
+def test_component_collection_is_bounded_and_persists_no_raw_body():
+    import base64
+    requests=[]
+    def transport(request):
+        requests.append(request)
+        if "/git/trees/" in request.full_url: return 200,{"tree":[{"type":"blob","path":"spareparts-www/README.md"},{"type":"blob","path":"other/package.json"}]}
+        package=json.dumps({"name":"spareparts-www","description":"Customer-facing UI for browsing spare parts","dependencies":{"next":"latest","react":"latest"},"privateSecret":"never persist"}).encode()
+        return 200,{"content":base64.b64encode(package).decode()}
+    components=GitHubClient("token",transport).components("sparepartslabs/spareparts","main",max_components=1,max_requests=1,max_bytes=4096)
+    assert len(components)==1 and components[0]["path"]=="other"
+    serialized=json.dumps(components)
+    assert len(requests)==2 and "never persist" not in serialized
+    assert components[0]["description"] == "spareparts-www — Customer-facing UI for browsing spare parts"
+    assert components[0]["frameworks"] == ["Next.js", "React"]
+
+def test_readme_extracts_heading_and_first_prose_not_badge():
+    import base64
+    def transport(request):
+        if "/git/trees/" in request.full_url: return 200,{"tree":[{"type":"blob","path":"spareparts-www/README.md"}]}
+        text="# Spare Parts Web\n\n[![build](https://example/badge)](x)\n\nThe customer UI for finding and ordering replacement parts.\n\nSECRET=not-in-summary"
+        return 200,{"content":base64.b64encode(text.encode()).decode()}
+    component=GitHubClient("token",transport).components("sparepartslabs/spareparts","main",max_components=2,max_requests=2,max_bytes=4096)[0]
+    assert component["description"] == "Spare Parts Web — The customer UI for finding and ordering replacement parts."
+    assert "SECRET" not in component["description"]
+
+def test_core_search_uses_exact_contract():
+    requests=[]
+    def transport(request): requests.append(request); return 200,{"revision":{},"fresh":True,"repositories":[]}
+    CoreClient("https://core","key",transport).search_ontology({"query":"x","limit":5})
+    assert requests[0].method=="POST" and requests[0].full_url.endswith("/ingestion/v1/ontology-context/search")
+    assert json.loads(requests[0].data)=={"query":"x","limit":5}
+
+def test_selected_semantic_candidate_persists_score_and_component(event):
+    ont={"revision_id":"r","complete":True,"repositories":[{"id":"R_core","full_name":"sparepartslabs/core","components":[]}]}
+    core=Core(ont)
+    core.search_ontology=lambda body:{"repositories":[{"id":"R_core","full_name":"sparepartslabs/core","match_kind":"semantic","score":0.88,"matched_components":[{"path":"api"}]}]}
+    provider=Provider({"affected_repositories":[{"repository_id":"R_core","rationale":"API match","confidence":0.8}]})
+    ingest_issue(event.__class__(**{**event.__dict__,"body":"Needs API work"}),provider,GitHub(),core)
+    link=core.submitted["affected_repositories"][0]
+    assert link["match_kind"]=="semantic" and link["score"]==0.88 and link["matched_path"]=="api"
+
+def test_selected_lexical_candidate_persists_evidence(event):
+    ont={"revision_id":"r","complete":True,"repositories":[{"id":"R_core","full_name":"sparepartslabs/core","components":[]}]}
+    core=Core(ont); core.search_ontology=lambda body:{"repositories":[{"id":"R_core","full_name":"sparepartslabs/core","match_kind":"lexical","score":0.6,"matched_components":[{"path":"api"}]}]}
+    provider=Provider({"affected_repositories":[{"repository_id":"R_core","rationale":"API terms","confidence":0.7}]})
+    ingest_issue(event.__class__(**{**event.__dict__,"body":"Needs API work"}),provider,GitHub(),core)
+    link=core.submitted["affected_repositories"][0]
+    assert link["match_kind"]=="lexical" and link["score"]==0.6 and link["matched_path"]=="api"
 
 
 def test_missing_ontology_builds_complete_catalog(event):

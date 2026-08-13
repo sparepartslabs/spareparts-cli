@@ -65,6 +65,26 @@ def routing_prompt(event: IssueEvent, repositories: list[dict[str, Any]]) -> str
         + json.dumps({"issue": {"title": event.title, "body": event.body, "repository": event.repository}, "repository_catalog": catalog}, separators=(",", ":"))
     )
 
+def explicit_routes(text: str, repositories: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    folded=text.casefold(); by_name: dict[str,list[dict[str,Any]]]={}
+    for repo in repositories: by_name.setdefault(str(repo["full_name"]).rsplit("/",1)[-1].casefold(), []).append(repo)
+    found={}
+    for repo in repositories:
+        full=str(repo["full_name"]); short=full.rsplit("/",1)[-1]
+        evidence=None
+        if full.casefold() in folded: evidence=("explicit_repository",None)
+        elif len(by_name[short.casefold()]) == 1 and re_search_token(folded, short.casefold()): evidence=("explicit_repository",None)
+        for component in repo.get("components", []):
+            path=str(component.get("path", "")).strip("/")
+            prefixes=(f"{short}/{path}", f"{full}/{path}")
+            if path and any(value.casefold() in folded for value in prefixes): evidence=("explicit_component",path)
+        if evidence: found[repo["id"]]={"repository_id":repo["id"],"full_name":full,"rationale":f"Explicit reference to {full}"+(f" component {evidence[1]}" if evidence[1] else ""),"confidence":1.0,"match_kind":evidence[0],**({"matched_path":evidence[1]} if evidence[1] else {})}
+    return list(found.values())
+
+def re_search_token(text: str, token: str) -> bool:
+    import re
+    return re.search(r"(?<![a-z0-9_.-])"+re.escape(token)+r"(?![a-z0-9_.-])", text) is not None
+
 
 def writeback_marker(source_id: str) -> str:
     digest = hashlib.sha256(source_id.encode()).hexdigest()
@@ -104,11 +124,14 @@ def render_summary(status: str, provider: str, ingestion_id: str | None, routes:
     return "\n".join(lines)
 
 
-def ingest_issue(event: IssueEvent, provider: Any, github: Any, core: Any, *, refresh: bool = False, max_repositories: int = 100, writeback: bool = False) -> dict[str, Any]:
+def ingest_issue(event: IssueEvent, provider: Any, github: Any, core: Any, *, refresh: bool = False, max_repositories: int = 100, writeback: bool = False, max_components: int = 100, max_component_requests: int = 4, max_component_bytes: int = 65536) -> dict[str, Any]:
     ontology = None if refresh else core.current_ontology(event.organization, max_repositories)
     if ontology is None:
         observed_at = now()
         repositories = github.repositories(event.organization, max_repositories)
+        for repository in repositories:
+            try: repository["components"] = github.components(repository["name_with_owner"], repository.get("metadata",{}).get("default_branch"), max_components=max_components, max_requests=max_component_requests, max_bytes=max_component_bytes)
+            except (IngestionError, AttributeError): repository["components"] = []
         identity = json.dumps(repositories, sort_keys=True, separators=(",", ":"))
         revision_id = "github:" + event.organization + ":" + hashlib.sha256(identity.encode()).hexdigest()
         ontology = core.create_ontology({
@@ -117,11 +140,31 @@ def ingest_issue(event: IssueEvent, provider: Any, github: Any, core: Any, *, re
             "repositories": [{**repository, "observed_at": observed_at} for repository in repositories],
         })
     ontology = validate_ontology(ontology)
+    issue_text=f"{event.title}\n{event.body}"
+    explicit=explicit_routes(issue_text, ontology["repositories"])
+    candidates=ontology["repositories"]
     try:
-        raw = json.loads(provider.complete(routing_prompt(event, ontology["repositories"]), ROUTING_SCHEMA))
+        search=core.search_ontology({"organization_login":event.organization,"query":issue_text,"limit":max_repositories,"component_limit":5,"stale_after_hours":24})
+        if isinstance(search.get("repositories"),list) and search["repositories"]: candidates=search["repositories"]
+    except (IngestionError, AttributeError): pass
+    try:
+        raw = json.loads(provider.complete(routing_prompt(event, candidates), ROUTING_SCHEMA))
     except json.JSONDecodeError as err:
         raise IngestionError("provider returned invalid JSON") from err
     routes = validate_routes(raw, ontology["repositories"])
+    evidence = {str(repo.get("id") or repo.get("repository_id")): repo for repo in candidates}
+    for route in routes:
+        candidate = evidence.get(route["repository_id"], {})
+        kind = candidate.get("match_kind")
+        if kind in ("semantic", "lexical"):
+            route["match_kind"] = kind
+            if isinstance(candidate.get("score"), (int, float)): route["score"] = float(candidate["score"])
+            matched = candidate.get("matched_components")
+            if isinstance(matched, list) and matched and isinstance(matched[0], dict) and matched[0].get("path"):
+                route["matched_path"] = matched[0]["path"]
+    merged={route["repository_id"]:route for route in routes}
+    for route in explicit: merged[route["repository_id"]]=route
+    routes=list(merged.values())
     partial = False
     for route in routes:
         try:

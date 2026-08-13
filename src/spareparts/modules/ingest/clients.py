@@ -3,12 +3,58 @@
 from __future__ import annotations
 
 import json
+import base64
+import hashlib
+import re
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Callable
 
 from .models import IngestionError
+
+SUMMARY_LIMIT = 320
+
+def _clean(value: Any, limit: int = SUMMARY_LIMIT) -> str:
+    text = " ".join(str(value or "").split())
+    text = re.sub(r"https?://\S+", "", text).replace("@", "")
+    return " ".join(text.split())[:limit]
+
+def _readme_summary(text: str, component: str) -> str:
+    heading = ""
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not heading and stripped.startswith("#"):
+            heading = _clean(stripped.lstrip("#").strip(), 100); continue
+        badge = stripped.startswith(("![", "[![", "<img", "<picture", "<!--"))
+        if not stripped:
+            if current: paragraphs.append(_clean(" ".join(current))); current=[]
+        elif not badge and not stripped.startswith(("#", "```", "---")):
+            current.append(stripped)
+    if current: paragraphs.append(_clean(" ".join(current)))
+    prose = next((value for value in paragraphs if value and not value.startswith("[")), "")
+    return _clean(" — ".join(value for value in (heading or component, prose) if value))
+
+def _manifest_summary(filename: str, text: str, component: str) -> tuple[str, list[str], list[str]]:
+    name, description, dependencies = component, "", []
+    try:
+        if filename == "package.json":
+            value = json.loads(text); name=_clean(value.get("name"),100) or name; description=_clean(value.get("description")); dependencies=sorted(set((value.get("dependencies") or {}) | (value.get("devDependencies") or {})))
+        elif filename == "pyproject.toml":
+            value=tomllib.loads(text); project=value.get("project",{}); name=_clean(project.get("name"),100) or name; description=_clean(project.get("description")); dependencies=[str(item).split(" ",1)[0].split("[",1)[0] for item in project.get("dependencies",[]) if isinstance(item,str)]
+        elif filename == "Cargo.toml":
+            value=tomllib.loads(text); package=value.get("package",{}); name=_clean(package.get("name"),100) or name; description=_clean(package.get("description")); dependencies=sorted((value.get("dependencies") or {}).keys())
+        elif filename == "go.mod":
+            match=re.search(r"(?m)^module\s+(\S+)",text); name=_clean(match.group(1),100) if match else name; dependencies=re.findall(r"(?m)^\s*([\w./-]+)\s+v\d",text)
+    except (json.JSONDecodeError, tomllib.TOMLDecodeError, TypeError, AttributeError):
+        pass
+    known={"next":"Next.js","react":"React","vue":"Vue","svelte":"Svelte","django":"Django","fastapi":"FastAPI","flask":"Flask","swiftui":"SwiftUI"}
+    frameworks=sorted({label for dep in dependencies for key,label in known.items() if key in dep.casefold()})
+    purpose=_clean(" — ".join(value for value in (name,description) if value)) or f"Manifest metadata for {component}."
+    return purpose, dependencies[:30], frameworks
 
 Transport = Callable[[urllib.request.Request], tuple[int, Any]]
 
@@ -63,6 +109,39 @@ class GitHubClient:
         if not isinstance(values, list):
             raise IngestionError("GitHub repository response was not an array")
         return [self._repository(repo) for repo in values[:limit]]
+
+    def components(self, full_name: str, branch: str | None, *, max_components: int, max_requests: int, max_bytes: int) -> list[dict[str, Any]]:
+        owner, repo = full_name.split("/", 1); base = f"/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}"
+        tree = self._get(base + "/git/trees/" + urllib.parse.quote(branch or "HEAD", safe=""), {"recursive": "1"})
+        entries = tree.get("tree", []) if isinstance(tree, dict) else []
+        manifests = ("README.md", "package.json", "pyproject.toml", "Cargo.toml", "go.mod")
+        paths = sorted(x["path"] for x in entries if isinstance(x, dict) and x.get("type") == "blob" and isinstance(x.get("path"), str) and (x["path"].rsplit("/",1)[-1] in manifests))[:max_requests]
+        components: dict[str, dict[str, Any]] = {}
+        used = 0
+        for path in paths:
+            value = self._get(base + "/contents/" + urllib.parse.quote(path, safe="/"), {"ref": branch or "HEAD"})
+            raw = value.get("content", "") if isinstance(value, dict) else ""
+            try: data = base64.b64decode(raw, validate=False)
+            except Exception: data = b""
+            data = data[:max(0, max_bytes-used)]; used += len(data)
+            text = data.decode(errors="replace"); root = path.rsplit("/",1)[0] if "/" in path else "."
+            item = components.setdefault(root, {"path": root, "kind": "package" if root != "." else "repository", "name": root.rsplit("/",1)[-1] if root != "." else repo, "description": "", "languages": [], "frameworks": [], "evidence": []})
+            filename=path.rsplit("/",1)[-1]; evidence_kind = "readme" if filename.lower()=="readme.md" else "manifest"
+            if evidence_kind == "readme": summary=_readme_summary(text,item["name"]); dependencies=[]
+            else: summary,dependencies,frameworks=_manifest_summary(filename,text,item["name"]); item["frameworks"].extend(frameworks)
+            item["evidence"].append({"kind": "readme" if path.lower().endswith("readme.md") else "manifest", "path": path, "summary": summary, "content_hash": "sha256:"+hashlib.sha256(data).hexdigest()})
+            if not item["description"] and summary: item["description"] = summary
+            if path.endswith("package.json"): item["languages"].append("JavaScript")
+            if path.endswith("pyproject.toml"): item["languages"].append("Python")
+            if used >= max_bytes: break
+        result=[]
+        for item in sorted(components.values(), key=lambda value: value["path"].casefold())[:max_components]:
+            item["languages"] = sorted(set(item["languages"]))
+            item["frameworks"] = sorted(set(item["frameworks"]))
+            item["evidence"] = sorted(item["evidence"], key=lambda value: (value["path"].casefold(), value["kind"]))
+            document=json.dumps({k:v for k,v in item.items() if k != "content_hash"}, sort_keys=True, separators=(",",":"))
+            item["content_hash"]="sha256:"+hashlib.sha256(document.encode()).hexdigest(); result.append(item)
+        return result
 
     @staticmethod
     def _repository(value: Any) -> dict[str, Any]:
@@ -170,6 +249,11 @@ class CoreClient:
         if not isinstance(response, dict) or not isinstance(response.get("id"), str):
             raise IngestionError("Core ontology creation response was invalid")
         return {**response, "revision_id": response["id"], "complete": True, "repositories": body["repositories"]}
+
+    def search_ontology(self, body: dict[str, Any]) -> dict[str, Any]:
+        status, response = self._request("POST", "/ingestion/v1/ontology-context/search", body)
+        if status < 200 or status >= 300 or not isinstance(response, dict): raise IngestionError(f"Core ontology search returned HTTP {status}")
+        return response
 
     def submit(self, body: dict[str, Any]) -> dict[str, Any]:
         status, response = self._request("POST", "/ingestion/v1/issues", body)

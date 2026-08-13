@@ -26,6 +26,9 @@ def register(parser: argparse.ArgumentParser) -> None:
     issue.add_argument("--refresh-ontology", action="store_true")
     issue.add_argument("--writeback", action="store_true", help="write an idempotent processing summary to the source issue")
     issue.add_argument("--max-repositories", type=int, default=100, choices=range(1, 101), metavar="1..100")
+    issue.add_argument("--max-components", type=int, default=100)
+    issue.add_argument("--max-component-requests", type=int, default=4)
+    issue.add_argument("--max-component-bytes", type=int, default=65536)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -38,7 +41,7 @@ def run(args: argparse.Namespace) -> int:
         provider = resolve(args.provider, args.model)
         github = GitHubClient(os.environ.get("GITHUB_TOKEN", ""))
         core = CoreClient(args.core_url or "", os.environ.get("SPAREPARTS_INGEST_KEY", ""))
-        result = ingest_issue(event, provider, github, core, refresh=args.refresh_ontology, max_repositories=args.max_repositories, writeback=args.writeback)
+        result = ingest_issue(event, provider, github, core, refresh=args.refresh_ontology, max_repositories=args.max_repositories, writeback=args.writeback, max_components=args.max_components, max_component_requests=args.max_component_requests, max_component_bytes=args.max_component_bytes)
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     except ProviderError as err:
