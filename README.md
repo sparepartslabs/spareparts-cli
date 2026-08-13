@@ -2,8 +2,8 @@
 
 The Spare Parts command line.
 
-```
-pip install ".[anthropic]"     # or [openai], or [gemini], or [all]
+```sh
+pip install "spareparts-cli[anthropic]"  # or [openai], [gemini], or [all]
 sp
 ```
 
