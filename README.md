@@ -182,6 +182,22 @@ they are never written to configuration, stdout, or Core records. Without `--wri
 With it, the sole GitHub mutation is the managed summary comment; the command never
 assigns users, edits issue content, starts builds, or updates Project fields.
 
+Routing resolves exact `owner/repository`, unique repository names, and known
+`repository/component-path` references before model inference. Explicit matches
+remain targets even when the model returns none. Ontology refreshes collect a
+stable, bounded set of README and manifest component summaries and hashes:
+
+```sh
+sp ingest issue "$GITHUB_EVENT_PATH" --core-url "$SP_CORE_URL" \
+  --max-components 100 --max-component-requests 4 \
+  --max-component-bytes 65536
+```
+
+Core owns semantic retrieval and its `voyage-context-4` credentials/model. The
+CLI sends only ordered component metadata and the plain issue query—never
+embedding keys, models, or vectors. If semantic retrieval is unavailable, Core
+falls back lexically and ingestion continues.
+
 ---
 
 ## `sp plugin`

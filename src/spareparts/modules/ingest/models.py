@@ -107,11 +107,12 @@ def validate_ontology(value: Any) -> dict[str, Any]:
         _text(full_name, "ontology repository full_name")
         repo["id"] = repo_id
         repo["full_name"] = full_name
+        if not isinstance(repo.get("components", []), list): raise IngestionError("ontology repository components must be an array")
     ontology["revision_id"] = revision_id
     return ontology
 
 
-def validate_routes(value: Any, repositories: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def validate_routes(value: Any, repositories: list[dict[str, Any]], match_kind: str = "model") -> list[dict[str, Any]]:
     result = _mapping(value, "provider result")
     routes = result.get("affected_repositories")
     if not isinstance(routes, list):
@@ -136,5 +137,6 @@ def validate_routes(value: Any, repositories: list[dict[str, Any]]) -> list[dict
             "full_name": catalog[repo_id]["full_name"],
             "rationale": rationale,
             "confidence": float(confidence),
+            "match_kind": match_kind,
         })
     return validated
