@@ -187,6 +187,26 @@ def test_valid_change_commits_pushes_and_opens_marker_pr(monkeypatch, tmp_path):
     assert "https://github/pr/9" in github.statuses[0][3]
 
 
+def test_build_configures_default_repository_local_git_identity(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "secret")
+    commands = Commands()
+    run_build(source_repository="sparepartslabs/distributor", issue_number=7, trigger_id="delivery", agent="codex", model=None, workspace=tmp_path, policy=policy(), core=Core(), github=GitHub(), commands=commands)
+    calls = [call[0] for call in commands.calls]
+    assert ["git", "config", "--local", "user.name", "Spare Parts Assembler"] in calls
+    assert ["git", "config", "--local", "user.email", "assembler@sparepartslabs.com"] in calls
+
+
+def test_build_allows_git_identity_environment_overrides(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "secret")
+    monkeypatch.setenv("BUILD_GIT_USER_NAME", "Custom Builder")
+    monkeypatch.setenv("BUILD_GIT_USER_EMAIL", "builder@example.com")
+    commands = Commands()
+    run_build(source_repository="sparepartslabs/distributor", issue_number=7, trigger_id="delivery", agent="codex", model=None, workspace=tmp_path, policy=policy(), core=Core(), github=GitHub(), commands=commands)
+    calls = [call[0] for call in commands.calls]
+    assert ["git", "config", "--local", "user.name", "Custom Builder"] in calls
+    assert ["git", "config", "--local", "user.email", "builder@example.com"] in calls
+
+
 def test_validation_failure_never_pushes(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "secret")
     core, commands = Core(), Commands(validation=1)
