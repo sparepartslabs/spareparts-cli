@@ -7,9 +7,10 @@ import pytest
 
 from spareparts.cli import main
 from spareparts.modules.build.adapters import invoke
-from spareparts.modules.build.clients import CommandResult, CoreClient
-from spareparts.modules.build.models import BuildError, Plan, Policy, safe_changed_paths
-from spareparts.modules.build.service import branch_for, marker, run_build, validate_plan
+from spareparts.modules.build.clients import CommandResult, Commands as SubprocessCommands, CoreClient
+from spareparts.modules.build.models import BuildError, Plan, Policy, Target, classify_changed_paths, safe_changed_paths
+from spareparts.modules.build.progress import HuddleMonitor, discover
+from spareparts.modules.build.service import PreparedTarget, _changed_paths, branch_for, marker, run_build, validate_plan
 
 
 def plan(targets=None):
@@ -35,7 +36,7 @@ class Core:
     def latest(self, repository, issue): return self.document
     def create_attempt(self, body):
         self.created.append(body)
-        return {"id": "attempt-123", "status": self.status, "pr_url": "https://pr/existing"}
+        return {"id": f"attempt-{len(self.created)}", "status": self.status, "pr_url": "https://pr/existing"}
     def update_attempt(self, attempt, body):
         self.updated.append((attempt, body))
         return {"id": attempt, **body}
@@ -49,7 +50,8 @@ class GitHub:
         self.statuses = []
         self.git_env = {"PATH": "/bin", "GIT_TERMINAL_PROMPT": "0"}
 
-    def metadata(self, repository): return self.info
+    def metadata(self, repository):
+        return self.info.get(repository, self.info) if isinstance(self.info.get(repository), dict) else self.info
     def clone(self, repository, path):
         self.clones.append((repository, path)); path.mkdir(parents=True)
     def publish_pr(self, repository, branch, base, title, body):
@@ -60,17 +62,35 @@ class GitHub:
 
 
 class Commands:
-    def __init__(self, *, diff="src/x.py", validation=0):
+    def __init__(self, *, diff="src/x.py", untracked="", validation=0, huddle_status="complete", incomplete_tasks=False):
         self.calls = []
         self.diff = diff
+        self.untracked = untracked
         self.validation = validation
+        self.huddle_status = huddle_status
+        self.incomplete_tasks = incomplete_tasks
+
+    def _write_huddle(self, root):
+        repositories = sorted(path for path in Path(root).iterdir() if path.is_dir() and path.name != ".sp")
+        rows = []
+        for repository in repositories:
+            tasks = repository / "specs/001-build/tasks.md"
+            tasks.parent.mkdir(parents=True, exist_ok=True)
+            tasks.write_text("- [ ] T001 unfinished\n" if self.incomplete_tasks else "- [x] T001 complete\n", encoding="utf-8")
+            rows.append(f"| {repository.name} | role | specs/001-build | implemented |")
+        huddle = Path(root) / ".sp/huddles/001-build/huddle.md"
+        huddle.parent.mkdir(parents=True, exist_ok=True)
+        huddle.write_text("# Huddle: Build\n\n**Status**: " + self.huddle_status + "\n\n## Repo Breakdown\n\n| Repo | Role | Spec | Stage |\n|---|---|---|---|\n" + "\n".join(rows) + "\n", encoding="utf-8")
 
     def __call__(self, argv, **kwargs):
         self.calls.append((argv, kwargs))
         if argv[:3] == ["git", "diff", "--name-only"]: return CommandResult(0, self.diff, "")
+        if argv[:3] == ["git", "ls-files", "--others"]: return CommandResult(0, self.untracked, "")
         if argv[:3] == ["git", "rev-parse", "origin/main^{commit}"]: return CommandResult(0, "base-sha", "")
         if argv[:3] == ["git", "rev-parse", "HEAD"]: return CommandResult(0, "commit-sha", "")
-        if argv and argv[0] in ("codex", "claude"): return CommandResult(0, "agent summary", "")
+        if argv and argv[0] in ("codex", "claude"):
+            self._write_huddle(kwargs["cwd"])
+            return CommandResult(0, "agent summary", "")
         if argv and argv[0] == "pytest": return CommandResult(self.validation, "", "failed" if self.validation else "")
         return CommandResult(0, "", "")
 
@@ -116,6 +136,12 @@ def test_validate_plan_resolves_missing_base_from_github():
 
 def test_changed_paths_reject_control_files():
     with pytest.raises(BuildError, match="forbidden"): safe_changed_paths(".github/workflows/pwn.yml")
+
+
+def test_change_classifier_keeps_product_and_excludes_local_control():
+    product, control = classify_changed_paths(["src/new.py", "specs/001/tasks.md", ".sp/feature.json"])
+    assert product == ["src/new.py"]
+    assert control == [".sp/feature.json", "specs/001/tasks.md"]
 
 
 def test_agent_adapters_are_normalized(monkeypatch, tmp_path):
@@ -182,9 +208,9 @@ def test_valid_change_commits_pushes_and_opens_marker_pr(monkeypatch, tmp_path):
     target = result["targets"][0]
     assert target["status"] == "pr_opened" and target["pr_number"] == 9
     assert "<!-- sp:build " in github.published[0][4]
-    assert ["git", "push", "--force-with-lease", "-u", "origin", branch_for(7, "attempt-123")] in [call[0] for call in commands.calls]
+    assert ["git", "push", "--force-with-lease", "-u", "origin", branch_for(7, "attempt-1")] in [call[0] for call in commands.calls]
     assert core.updated[-1][1]["commit_sha"] == "commit-sha"
-    assert "https://github/pr/9" in github.statuses[0][3]
+    assert any("https://github/pr/9" in status[3] for status in github.statuses)
 
 
 def test_build_configures_default_repository_local_git_identity(monkeypatch, tmp_path):
@@ -213,6 +239,77 @@ def test_validation_failure_never_pushes(monkeypatch, tmp_path):
     result = run_build(source_repository="sparepartslabs/distributor", issue_number=7, trigger_id="delivery", agent="codex", model=None, workspace=tmp_path, policy=policy(), core=core, github=GitHub(), commands=commands)
     assert result["targets"][0]["status"] == "rejected"
     assert not any(call[0][:2] == ["git", "push"] for call in commands.calls)
+
+
+def test_two_targets_install_context_and_invoke_one_workspace_agent(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "secret")
+    targets = [
+        {"repository_id": "R_core", "name_with_owner": "sparepartslabs/core", "base_branch": "main", "rationale": "API", "confidence": 0.8},
+        {"repository_id": "R_web", "name_with_owner": "sparepartslabs/spareparts", "base_branch": "main", "rationale": "UI", "confidence": 0.9},
+    ]
+    github = GitHub({
+        "sparepartslabs/core": {"node_id": "R_core", "default_branch": "main"},
+        "sparepartslabs/spareparts": {"node_id": "R_web", "default_branch": "main"},
+    })
+    commands = Commands()
+    result = run_build(source_repository="sparepartslabs/distributor", issue_number=7, trigger_id="delivery", agent="codex", model=None, workspace=tmp_path, policy=policy(), core=Core(plan(targets)), github=github, commands=commands)
+    calls = [call[0] for call in commands.calls]
+    assert len([argv for argv in calls if argv and argv[0] == "codex"]) == 1
+    assert len([argv for argv in calls if argv[:3] == ["sp", "ec", "install"]]) == 1
+    install = next(call for call in commands.calls if call[0][:3] == ["sp", "ec", "install"])
+    assert "GITHUB_TOKEN" not in install[1]["env"] and "SPAREPARTS_INGEST_KEY" not in install[1]["env"]
+    assert [item["status"] for item in result["targets"]] == ["pr_opened", "pr_opened"]
+
+
+def test_untracked_product_files_are_staged(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "secret")
+    commands = Commands(diff="styles/docs.css\0", untracked="content/docs/ontology.md\0")
+    result = run_build(source_repository="sparepartslabs/distributor", issue_number=7, trigger_id="delivery", agent="codex", model=None, workspace=tmp_path, policy=policy(), core=Core(), github=GitHub(), commands=commands)
+    assert result["targets"][0]["status"] == "pr_opened"
+    assert ["git", "add", "-A", "--", "content/docs/ontology.md", "styles/docs.css"] in [call[0] for call in commands.calls]
+
+
+def test_incomplete_huddle_tasks_reject_publication(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "secret")
+    commands = Commands(incomplete_tasks=True)
+    result = run_build(source_repository="sparepartslabs/distributor", issue_number=7, trigger_id="delivery", agent="codex", model=None, workspace=tmp_path, policy=policy(), core=Core(), github=GitHub(), commands=commands)
+    assert result["targets"][0]["status"] == "rejected"
+    assert "incomplete tasks" in result["targets"][0]["summary"]
+    assert not any(call[0][:2] == ["git", "push"] for call in commands.calls)
+
+
+def test_huddle_progress_is_coalesced(tmp_path):
+    bodies = []
+    monitor = HuddleMonitor(tmp_path, bodies.append, "<!-- progress -->", "claude", None, interval=0.01)
+    assert monitor.sync(initial=True) is None
+    assert monitor.sync() is None
+    Commands(huddle_status="active")._write_huddle(tmp_path)
+    assert monitor.sync().status == "active"
+    Commands(huddle_status="complete")._write_huddle(tmp_path)
+    snapshot = monitor.sync()
+    monitor.sync()
+    assert snapshot is not None and snapshot.status == "complete"
+    assert len(bodies) == 3
+    assert discover(tmp_path) == snapshot
+
+
+def test_real_git_inventory_includes_untracked_and_excludes_specs(tmp_path):
+    commands = SubprocessCommands()
+    assert commands(["git", "init", "-q"], cwd=tmp_path).code == 0
+    tracked = tmp_path / "tracked.txt"
+    tracked.write_text("before\n", encoding="utf-8")
+    assert commands(["git", "add", "tracked.txt"], cwd=tmp_path).code == 0
+    assert commands(["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"], cwd=tmp_path).code == 0
+    base = commands(["git", "rev-parse", "HEAD"], cwd=tmp_path).stdout.strip()
+    tracked.write_text("after\n", encoding="utf-8")
+    (tmp_path / "new.txt").write_text("new\n", encoding="utf-8")
+    tasks = tmp_path / "specs/001/tasks.md"
+    tasks.parent.mkdir(parents=True)
+    tasks.write_text("- [x] done\n", encoding="utf-8")
+    item = PreparedTarget(Target("R", "sparepartslabs/core", "main", "", 1.0), "main", "attempt", "branch", tmp_path)
+    product, control = _changed_paths(item, base, commands, {})
+    assert product == ["new.txt", "tracked.txt"]
+    assert control == ["specs/001/tasks.md"]
 
 
 def test_marker_and_branch_are_deterministic():
