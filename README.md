@@ -40,6 +40,10 @@ sp build issue \
 
 Credentials are environment-only. The coding agent never commits, pushes, or
 creates PRs; the orchestrator does so only after policy and validation pass.
+Build commits use the repository-local identity
+`Spare Parts Assembler <assembler@sparepartslabs.com>` by default. Override it
+with `BUILD_GIT_USER_NAME` and `BUILD_GIT_USER_EMAIL`; global Git configuration
+is never modified.
 Use `--dry-run` to validate Core/GitHub plan authorization without cloning or
 publishing. The runner container/platform must enforce non-root filesystem,
 resource, process, and egress isolation for trusted repositories.

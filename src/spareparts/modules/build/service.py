@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,8 @@ from .clients import Commands, CoreClient, GitHub
 from .models import BuildError, Plan, Policy, Target, safe_changed_paths
 
 TERMINAL = {"pr_opened", "no_change", "rejected", "retryable_failure", "permanent_failure"}
+DEFAULT_GIT_USER_NAME = "Spare Parts Assembler"
+DEFAULT_GIT_USER_EMAIL = "assembler@sparepartslabs.com"
 
 
 def branch_for(issue: int, attempt_id: str) -> str:
@@ -53,6 +56,13 @@ def _git(commands: Commands, argv: list[str], cwd: Path, env: dict[str, str] | N
     return result.stdout.strip()
 
 
+def _configure_git_identity(commands: Commands, checkout: Path, env: dict[str, str]) -> None:
+    name = os.environ.get("BUILD_GIT_USER_NAME", "").strip() or DEFAULT_GIT_USER_NAME
+    email = os.environ.get("BUILD_GIT_USER_EMAIL", "").strip() or DEFAULT_GIT_USER_EMAIL
+    _git(commands, ["config", "--local", "user.name", name], checkout, env)
+    _git(commands, ["config", "--local", "user.email", email], checkout, env)
+
+
 def run_build(*, source_repository: str, issue_number: int, trigger_id: str, agent: str, model: str | None, workspace: Path, policy: Policy, core: CoreClient, github: GitHub, commands: Commands, dry_run: bool = False) -> dict[str, Any]:
     plan = Plan.parse(core.latest(source_repository, issue_number))
     if plan.ingestion["source_repository"].lower() != source_repository.lower() or plan.ingestion["issue_number"] != issue_number:
@@ -78,6 +88,7 @@ def run_build(*, source_repository: str, issue_number: int, trigger_id: str, age
             _git(commands, ["fetch", "origin", base], checkout, github.git_env)
             base_sha = _git(commands, ["rev-parse", f"origin/{base}^{{commit}}"], checkout, github.git_env)
             _git(commands, ["checkout", "-B", branch, base_sha], checkout, github.git_env)
+            _configure_git_identity(commands, checkout, github.git_env)
             agent_summary = invoke(agent, model, prompt(plan, target, branch), checkout, commands, policy.timeout)
             paths = safe_changed_paths(_git(commands, ["diff", "--name-only", base_sha], checkout, github.git_env))
             if not paths:
