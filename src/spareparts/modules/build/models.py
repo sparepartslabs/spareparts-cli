@@ -102,3 +102,36 @@ def safe_changed_paths(text: str) -> list[str]:
         if path.is_absolute() or ".." in path.parts or path.parts[:1] in ((".git",), (".github",)):
             raise BuildError(f"agent changed forbidden path: {value}", "rejected")
     return sorted(set(paths))
+
+
+_LOCAL_CONTROL = (
+    (".sp",),
+    ("specs",),
+    (".agents", "skills"),
+    (".claude", "commands"),
+    (".codex",),
+    (".cursor", "commands"),
+    (".gemini", "commands"),
+)
+_CREDENTIAL_NAMES = {".env", ".env.local", "credentials", "credentials.json", "secrets.json"}
+
+
+def classify_changed_paths(values: list[str]) -> tuple[list[str], list[str]]:
+    """Return publishable and local-control paths, rejecting unsafe paths."""
+    product: set[str] = set()
+    control: set[str] = set()
+    for value in values:
+        if not value or any(ord(character) < 32 for character in value):
+            raise BuildError("agent produced an invalid changed path", "rejected")
+        path = PurePosixPath(value)
+        lowered = tuple(part.lower() for part in path.parts)
+        if path.is_absolute() or ".." in path.parts or lowered[:1] in ((".git",), (".github",)):
+            raise BuildError(f"agent changed forbidden path: {value}", "rejected")
+        if any(lowered[: len(prefix)] == prefix for prefix in _LOCAL_CONTROL):
+            control.add(value)
+            continue
+        name = path.name.lower()
+        if name in _CREDENTIAL_NAMES or name.endswith((".pem", ".key", ".p12", ".pfx")):
+            raise BuildError(f"agent changed credential-like path: {value}", "rejected")
+        product.add(value)
+    return sorted(product), sorted(control)

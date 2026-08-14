@@ -22,9 +22,12 @@ sp
 ## `sp build`
 
 `sp build issue` resolves authoritative affected repositories from Core, applies
-explicit organization/repository allowlists and a fan-out cap, runs Codex or
-Claude in a fresh target checkout, validates the diff, and creates or updates a
-deterministically marked pull request:
+explicit organization/repository allowlists and a fan-out cap, prepares all
+approved repositories in one isolated workspace, and installs the published
+Spare Parts engineering context. One Codex or Claude invocation uses the
+workspace huddle command to drive every repository through specify, plan,
+tasks, and implement before the orchestrator validates and publishes one
+deterministically marked pull request per changed target:
 
 ```sh
 export SPAREPARTS_INGEST_KEY=...
@@ -40,10 +43,17 @@ sp build issue \
 
 Credentials are environment-only. The coding agent never commits, pushes, or
 creates PRs; the orchestrator does so only after policy and validation pass.
+The orchestrator mirrors canonical huddle status and repository stages into one
+marker-backed source-issue comment as the huddle changes. GitHub/Core mutation
+credentials remain outside the coding-agent process.
 Build commits use the repository-local identity
 `Spare Parts Assembler <assembler@sparepartslabs.com>` by default. Override it
 with `BUILD_GIT_USER_NAME` and `BUILD_GIT_USER_EMAIL`; global Git configuration
 is never modified.
+Safe tracked and untracked product files are published. Workspace huddles,
+`specs/`, `.sp/` state, and generated agent commands remain local and are never
+included in product commits. Publication fails closed when the huddle or its
+repository task lists are incomplete.
 Use `--dry-run` to validate Core/GitHub plan authorization without cloning or
 publishing. The runner container/platform must enforce non-root filesystem,
 resource, process, and egress isolation for trusted repositories.
