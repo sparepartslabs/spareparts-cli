@@ -161,6 +161,17 @@ def test_agent_adapters_are_normalized(monkeypatch, tmp_path):
     assert "OPENAI_API_KEY" not in commands.calls[-1][1]["env"]
 
 
+
+def test_claude_failure_uses_stdout_when_stderr_is_empty(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
+
+    def commands(*args, **kwargs):
+        return CommandResult(1, "useful Claude failure", "")
+
+    with pytest.raises(BuildError, match="claude failed with exit 1: useful Claude failure"):
+        invoke("claude", None, "prompt", tmp_path, commands, 10)
+
+
 def test_core_contract_uses_api_key_and_exact_routes():
     requests = []
     def transport(request):

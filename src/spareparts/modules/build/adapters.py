@@ -42,5 +42,6 @@ def invoke(agent: str, model: str | None, prompt: str, checkout: Path, commands:
         raise BuildError(f"unknown build agent: {agent}")
     result = commands(argv, cwd=checkout, timeout=timeout, input_text=prompt if agent == "codex" else None, env=environment)
     if result.code:
-        raise BuildError(f"{agent} failed with exit {result.code}: {result.stderr.strip()[:1000]}", "retryable_failure")
+        detail = result.stderr.strip() or result.stdout.strip() or "no output"
+        raise BuildError(f"{agent} failed with exit {result.code}: {detail[-1000:]}", "retryable_failure")
     return result.stdout.strip()[:4000]
