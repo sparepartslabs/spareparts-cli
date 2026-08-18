@@ -105,7 +105,7 @@ jobs:
         run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Assume changelog publisher role
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.CHANGELOG_AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
