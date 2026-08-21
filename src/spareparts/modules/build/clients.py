@@ -52,7 +52,7 @@ def transport(request: urllib.request.Request) -> tuple[int, Any]:
 class CoreClient:
     def __init__(self, url: str, key: str, request: Transport = transport):
         if not url: raise BuildError("--core-url is required")
-        if not key: raise BuildError("SPAREPARTS_INGEST_KEY is required")
+        if not key: raise BuildError("SPAREPARTS_API_KEY is required")
         self.url, self.key, self.request = url.rstrip("/"), key, request
 
     def _call(self, method: str, path: str, body: Any = None) -> Any:

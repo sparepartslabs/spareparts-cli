@@ -298,9 +298,9 @@ def sync(
         ]
     if not selected:
         raise WorkspaceSyncError(f"no artifacts found for {event}")
-    key = os.environ.get("SPAREPARTS_INGEST_KEY")
+    key = os.environ.get("SPAREPARTS_API_KEY") or os.environ.get("SPAREPARTS_INGEST_KEY")
     if not dry_run and not key:
-        raise WorkspaceSyncError("SPAREPARTS_INGEST_KEY is required")
+        raise WorkspaceSyncError("SPAREPARTS_API_KEY is required")
 
     results = []
     for path in selected:

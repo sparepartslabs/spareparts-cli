@@ -10,7 +10,7 @@ from pathlib import Path
 
 from spareparts.providers import ProviderError, resolve
 
-from .clients import CoreClient, GitHubClient
+from .clients import CoreClient, GitHubClient, spareparts_api_key
 from .models import IngestionError, IssueEvent
 from .service import ingest_issue
 
@@ -40,7 +40,7 @@ def run(args: argparse.Namespace) -> int:
         event = IssueEvent.from_payload(payload, args.delivery_id)
         provider = resolve(args.provider, args.model)
         github = GitHubClient(os.environ.get("GITHUB_TOKEN", ""))
-        core = CoreClient(args.core_url or "", os.environ.get("SPAREPARTS_INGEST_KEY", ""))
+        core = CoreClient(args.core_url or "", spareparts_api_key())
         result = ingest_issue(event, provider, github, core, refresh=args.refresh_ontology, max_repositories=args.max_repositories, writeback=args.writeback, max_components=args.max_components, max_component_requests=args.max_component_requests, max_component_bytes=args.max_component_bytes)
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0

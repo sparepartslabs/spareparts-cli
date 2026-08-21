@@ -30,7 +30,7 @@ tasks, and implement before the orchestrator validates and publishes one
 deterministically marked pull request per changed target:
 
 ```sh
-export SPAREPARTS_INGEST_KEY=...
+export SPAREPARTS_API_KEY=...
 export GITHUB_TOKEN=...           # short-lived GitHub App installation token
 export OPENAI_API_KEY=...         # or supported Claude/subscription credential
 
@@ -129,7 +129,7 @@ environment and is never written to `.sp/integrations.json`:
 
 ```bash
 sp ec workspace configure --workspace workspace_...
-export SPAREPARTS_INGEST_KEY=sp_...
+export SPAREPARTS_API_KEY=sp_...
 sp ec workspace sync .sp/huddles/001-example/huddle.md
 sp ec workspace sync --all
 ```
@@ -161,7 +161,7 @@ steps:
   - run: pipx install spareparts-cli
   - run: sp ec workspace reconcile --ref "$GITHUB_SHA" --dir .
     env:
-      SPAREPARTS_INGEST_KEY: ${{ secrets.SPAREPARTS_INGEST_KEY }}
+      SPAREPARTS_API_KEY: ${{ secrets.SPAREPARTS_API_KEY }}
 ```
 
 The local Markdown remains authoritative if synchronization fails. Repeated
@@ -178,7 +178,7 @@ idempotent result to Core:
 
 ```sh
 export GITHUB_TOKEN=...
-export SPAREPARTS_INGEST_KEY=...
+export SPAREPARTS_API_KEY=...
 export OPENAI_API_KEY=... # or ANTHROPIC_API_KEY / GEMINI_API_KEY
 
 sp ingest issue "$GITHUB_EVENT_PATH" \
@@ -431,3 +431,5 @@ TypeScript in
 prompts in `generator.py` are the part worth keeping identical — changing the
 wording here without changing it there produces two tools that disagree about
 the same diff.
+
+`SPAREPARTS_API_KEY` is the canonical Core credential. During the compatibility window, commands accept `SPAREPARTS_INGEST_KEY` only when the canonical variable is absent.

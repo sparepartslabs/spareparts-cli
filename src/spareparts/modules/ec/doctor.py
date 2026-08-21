@@ -46,10 +46,10 @@ def checks(root: Path) -> list[Check]:
     workspace = workspaces.find_config(root)
     if workspace is None:
         results.append(Check("Spare Parts workspace", "missing", "No API workspace configured.", "Run: sp ec workspace configure --workspace WORKSPACE_ID"))
-    elif os.environ.get("SPAREPARTS_INGEST_KEY"):
+    elif os.environ.get("SPAREPARTS_API_KEY") or os.environ.get("SPAREPARTS_INGEST_KEY"):
         results.append(Check("Spare Parts workspace", "ready", f"Workspace: {workspace[1]['workspace_id']}"))
     else:
-        results.append(Check("Spare Parts workspace", "blocked", f"Workspace: {workspace[1]['workspace_id']}; ingest key missing.", "Set SPAREPARTS_INGEST_KEY."))
+        results.append(Check("Spare Parts workspace", "blocked", f"Workspace: {workspace[1]['workspace_id']}; ingest key missing.", "Set SPAREPARTS_API_KEY."))
 
     git_name = subprocess.run(
         ["git", "config", "--get", "user.name"], cwd=root, capture_output=True, text=True, check=False
