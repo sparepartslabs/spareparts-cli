@@ -318,17 +318,15 @@ def test_writeback_failure_reports_persisted_ingestion(event):
         ingest_issue(event, Provider(), GitHub(failure="writeback"), Core(ontology()), writeback=True)
 
 
-def test_github_writeback_updates_only_own_marked_comment():
+def test_github_writeback_updates_only_marked_bot_comment():
     requests = []
     marker = writeback_marker("delivery-1")
     def transport(request):
         requests.append(request)
-        if request.full_url.endswith("/installation"):
-            return 200, {"app_slug": "github-actions"}
         if "/comments?" in request.full_url:
             return 200, [
-                {"id": 1, "body": marker, "user": {"login": "someone"}},
-                {"id": 2, "body": marker, "user": {"login": "github-actions[bot]"}},
+                {"id": 1, "body": marker, "user": {"login": "someone", "type": "User"}},
+                {"id": 2, "body": marker, "user": {"login": "spare-parts[bot]", "type": "Bot"}},
             ]
         return 200, {"id": 2, "html_url": "https://example/2"}
     result = GitHubClient("token", transport).upsert_issue_summary("org/repo", 42, marker, "new body")
@@ -336,17 +334,17 @@ def test_github_writeback_updates_only_own_marked_comment():
     assert requests[-1].method == "PATCH"
     assert requests[-1].full_url.endswith("/repos/org/repo/issues/comments/2")
     assert json.loads(requests[-1].data) == {"body": "new body"}
+    assert all(not request.full_url.endswith("/installation") for request in requests)
 
 
 def test_github_writeback_creates_when_no_owned_marker_exists():
     requests = []
     def transport(request):
         requests.append(request)
-        if request.full_url.endswith("/installation"):
-            return 200, {"app_slug": "spare-parts"}
         if "/comments?" in request.full_url:
-            return 200, []
+            return 200, [{"id": 1, "body": "marker", "user": {"login": "someone", "type": "User"}}]
         return 201, {"id": 3, "html_url": "https://example/3"}
     result = GitHubClient("token", transport).upsert_issue_summary("org/repo", 42, "marker", "body")
     assert result["action"] == "created"
     assert requests[-1].method == "POST"
+    assert all(request.get_method() != "PATCH" for request in requests)
