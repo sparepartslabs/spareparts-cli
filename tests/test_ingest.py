@@ -208,6 +208,9 @@ def test_missing_ontology_builds_complete_catalog(event):
     assert core.created["organization_login"] == "sparepartslabs"
     assert core.created["revision_id"].startswith("github:sparepartslabs:")
     assert github.catalog_calls == 1
+    assert core.created["refresh"]["component_count"] == 0
+    assert core.created["refresh"]["github_request_count"] == 0
+    assert core.created["refresh"]["catalog_duration_ms"] >= 0
 
 
 def test_existing_ontology_skips_catalog_refresh(event):

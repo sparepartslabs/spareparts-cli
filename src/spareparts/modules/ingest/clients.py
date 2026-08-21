@@ -87,8 +87,10 @@ class GitHubClient:
             raise IngestionError("GitHub ingestion needs GITHUB_TOKEN set")
         self.token = token
         self.transport = transport
+        self.request_count = 0
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        self.request_count += 1
         query = "?" + urllib.parse.urlencode(params) if params else ""
         request = urllib.request.Request(
             "https://api.github.com" + path + query,
@@ -100,6 +102,7 @@ class GitHubClient:
         return body
 
     def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
+        self.request_count += 1
         data = json.dumps(body, separators=(",", ":")).encode() if body is not None else None
         request = urllib.request.Request(
             "https://api.github.com" + path, method=method, data=data,
