@@ -123,9 +123,14 @@ class GitHub:
         return {"number": number, "url": url}
 
     def publish_status(self, repository: str, issue: int, marker: str, body: str) -> None:
-        text = self._run(["gh", "api", f"repos/{repository}/issues/{issue}/comments", "--paginate"])
-        try: comments = json.loads(text or "[]")
-        except json.JSONDecodeError as error: raise BuildError("GitHub issue comments were invalid", "retryable_failure") from error
+        text = self._run(["gh", "api", f"repos/{repository}/issues/{issue}/comments", "--paginate", "--slurp"])
+        try:
+            pages = json.loads(text or "[]")
+            if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
+                raise ValueError("invalid comment pages")
+            comments = [item for page in pages for item in page]
+        except (json.JSONDecodeError, ValueError) as error:
+            raise BuildError("GitHub issue comments were invalid", "retryable_failure") from error
         existing = next((item for item in comments if isinstance(item, dict) and marker in str(item.get("body", ""))), None)
         if existing:
             self._run(["gh", "api", "--method", "PATCH", f"repos/{repository}/issues/comments/{existing['id']}", "-f", f"body={body}"])
