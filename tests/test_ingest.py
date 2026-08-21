@@ -185,7 +185,7 @@ def test_core_search_uses_exact_contract():
 def test_selected_semantic_candidate_persists_score_and_component(event):
     ont={"revision_id":"r","complete":True,"repositories":[{"id":"R_core","full_name":"sparepartslabs/core","components":[]}]}
     core=Core(ont)
-    core.search_ontology=lambda body:{"repositories":[{"id":"R_core","full_name":"sparepartslabs/core","match_kind":"semantic","score":0.88,"matched_components":[{"path":"api"}]}]}
+    core.search_ontology=lambda body:{"repositories":[{"repository_id":"R_core","name_with_owner":"sparepartslabs/core","components":[],"match_kind":"semantic","score":0.88,"matched_components":[{"path":"api"}]}]}
     provider=Provider({"affected_repositories":[{"repository_id":"R_core","rationale":"API match","confidence":0.8}]})
     ingest_issue(event.__class__(**{**event.__dict__,"body":"Needs API work"}),provider,GitHub(),core)
     link=core.submitted["affected_repositories"][0]
