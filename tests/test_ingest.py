@@ -257,11 +257,12 @@ def test_github_catalog_is_bounded_and_normalized():
     requests = []
     def transport(request):
         requests.append(request)
-        return 200, [{"node_id": "R_1", "full_name": "org/repo", "private": True}]
+        return 200, {"total_count": 1, "repositories": [{"node_id": "R_1", "full_name": "org/repo", "private": True}]}
     client = GitHubClient("runtime-token", transport)
     repos = client.repositories("org", 10)
     assert repos[0]["visibility"] == "private"
     assert repos[0]["repository_id"] == "R_1"
+    assert "/installation/repositories?" in requests[0].full_url
     assert "per_page=10" in requests[0].full_url
 
 
