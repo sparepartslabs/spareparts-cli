@@ -18,7 +18,7 @@ MAX_TOKENS = 16000
 
 
 class AnthropicProvider:
-    def __init__(self, model: str):
+    def __init__(self, model: str, credential: str | None = None):
         try:
             import anthropic
         except ImportError as err:
@@ -28,7 +28,7 @@ class AnthropicProvider:
 
         self.label = f"anthropic:{model}"
         self.model = model
-        self._client = anthropic.Anthropic()
+        self._client = anthropic.Anthropic(api_key=credential)
 
     def complete(self, prompt: str, schema: dict[str, Any]) -> str:
         messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
@@ -65,5 +65,5 @@ class AnthropicProvider:
         raise ProviderError(f"{self.label}: the turn never finished.")
 
 
-def build(model: str) -> AnthropicProvider:
-    return AnthropicProvider(model)
+def build(model: str, credential: str | None = None) -> AnthropicProvider:
+    return AnthropicProvider(model, credential)

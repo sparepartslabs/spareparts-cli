@@ -47,6 +47,11 @@ MODULES: tuple[Module, ...] = (
         package="spareparts.modules.ingest",
     ),
     Module(
+        name="intake",
+        summary="Run one private issue intake job",
+        package="spareparts.modules.intake",
+    ),
+    Module(
         name="lgtm",
         summary="Prove you read a diff before you merge it",
         package="spareparts.modules.lgtm",

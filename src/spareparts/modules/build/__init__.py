@@ -40,7 +40,7 @@ def run(args: argparse.Namespace) -> int:
         if any(not value for value in validations): raise BuildError("--validation-command must not be empty")
         policy = Policy(frozenset(value.lower() for value in args.allowed_org), frozenset(repository_name(value, "--allowed-repository").lower() for value in args.allowed_repository), args.max_fanout, validations)
         commands = Commands()
-        result = run_build(source_repository=source, issue_number=args.issue_number, trigger_id=args.trigger_delivery_id, agent=args.agent, model=args.model, workspace=args.workspace.resolve(), policy=policy, core=CoreClient(args.core_url or "", os.environ.get("SPAREPARTS_INGEST_KEY", "")), github=GitHub(commands, os.environ.get("GITHUB_TOKEN", "")), commands=commands, dry_run=args.dry_run)
+        result = run_build(source_repository=source, issue_number=args.issue_number, trigger_id=args.trigger_delivery_id, agent=args.agent, model=args.model, workspace=args.workspace.resolve(), policy=policy, core=CoreClient(args.core_url or "", os.environ.get("SPAREPARTS_API_KEY", "") or os.environ.get("SPAREPARTS_INGEST_KEY", "")), github=GitHub(commands, os.environ.get("GITHUB_TOKEN", "")), commands=commands, dry_run=args.dry_run)
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0 if result["status"] == "success" else 1
     except (BuildError, ValueError) as error:

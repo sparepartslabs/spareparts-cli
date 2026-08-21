@@ -33,7 +33,7 @@ def _plain(schema: Any) -> Any:
 
 
 class GeminiProvider:
-    def __init__(self, model: str):
+    def __init__(self, model: str, credential: str | None = None):
         try:
             from google import genai
         except ImportError as err:
@@ -45,7 +45,7 @@ class GeminiProvider:
         self.model = model
         # Reads GEMINI_API_KEY, then GOOGLE_API_KEY. `resolve` has already
         # confirmed one of them is set.
-        self._client = genai.Client()
+        self._client = genai.Client(api_key=credential)
 
     def complete(self, prompt: str, schema: dict[str, Any]) -> str:
         from google.genai import types
@@ -82,5 +82,5 @@ class GeminiProvider:
         return text
 
 
-def build(model: str) -> GeminiProvider:
-    return GeminiProvider(model)
+def build(model: str, credential: str | None = None) -> GeminiProvider:
+    return GeminiProvider(model, credential)

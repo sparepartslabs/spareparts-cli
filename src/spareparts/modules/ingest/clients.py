@@ -16,6 +16,12 @@ from .models import IngestionError
 
 SUMMARY_LIMIT = 320
 
+def spareparts_api_key(environment: dict[str, str] | None = None) -> str:
+    """Canonical repository credential with bounded legacy fallback."""
+    import os
+    values = os.environ if environment is None else environment
+    return values.get("SPAREPARTS_API_KEY", "") or values.get("SPAREPARTS_INGEST_KEY", "")
+
 def _clean(value: Any, limit: int = SUMMARY_LIMIT) -> str:
     text = " ".join(str(value or "").split())
     text = re.sub(r"https?://\S+", "", text).replace("@", "")
@@ -209,7 +215,7 @@ class CoreClient:
         if not base_url:
             raise IngestionError("--core-url is required")
         if not token:
-            raise IngestionError("Core ingestion needs SPAREPARTS_INGEST_KEY set")
+            raise IngestionError("Core ingestion needs SPAREPARTS_API_KEY set")
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.transport = transport
@@ -253,6 +259,15 @@ class CoreClient:
     def search_ontology(self, body: dict[str, Any]) -> dict[str, Any]:
         status, response = self._request("POST", "/ingestion/v1/ontology-context/search", body)
         if status < 200 or status >= 300 or not isinstance(response, dict): raise IngestionError(f"Core ontology search returned HTTP {status}")
+        return response
+
+    def latest_issue(self, source_repository: str, issue_number: int) -> dict[str, Any] | None:
+        query = urllib.parse.urlencode({"source_repository": source_repository, "issue_number": issue_number})
+        status, response = self._request("GET", "/ingestion/v1/issues/latest?" + query)
+        if status == 404:
+            return None
+        if status < 200 or status >= 300 or not isinstance(response, dict):
+            raise IngestionError(f"Core latest ingestion request returned HTTP {status}")
         return response
 
     def submit(self, body: dict[str, Any]) -> dict[str, Any]:

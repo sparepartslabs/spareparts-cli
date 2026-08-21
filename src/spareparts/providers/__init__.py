@@ -102,6 +102,20 @@ def available() -> list[str]:
     return [v.name for v in VENDORS if any(os.environ.get(k) for k in v.env_keys)]
 
 
+def resolve_with_credential(spec: str, credential: str, model: str | None = None) -> Provider:
+    """Build one provider directly from a claimed credential without process-env mutation."""
+    name, _, spec_model = spec.partition(":")
+    name = name.strip().lower()
+    vendor = _BY_NAME.get(name)
+    if vendor is None:
+        known = ", ".join(v.name for v in VENDORS)
+        raise ProviderError(f"Unknown provider {name!r}. Known providers: {known}.")
+    if not credential:
+        raise ProviderError(f"{name} credential is empty.")
+    chosen = model or spec_model or vendor.default_model
+    return importlib.import_module(vendor.module).build(chosen, credential)
+
+
 def resolve(spec: str | None, model: str | None = None) -> Provider:
     """
     Turn `"openai"` or `"openai:gpt-5"` or None into something callable.

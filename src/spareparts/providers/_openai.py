@@ -40,7 +40,7 @@ def _strictify(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 class OpenAIProvider:
-    def __init__(self, model: str):
+    def __init__(self, model: str, credential: str | None = None):
         try:
             import openai
         except ImportError as err:
@@ -50,7 +50,7 @@ class OpenAIProvider:
 
         self.label = f"openai:{model}"
         self.model = model
-        self._client = openai.OpenAI()
+        self._client = openai.OpenAI(api_key=credential)
 
     def complete(self, prompt: str, schema: dict[str, Any]) -> str:
         try:
@@ -88,5 +88,5 @@ class OpenAIProvider:
         return text
 
 
-def build(model: str) -> OpenAIProvider:
-    return OpenAIProvider(model)
+def build(model: str, credential: str | None = None) -> OpenAIProvider:
+    return OpenAIProvider(model, credential)
