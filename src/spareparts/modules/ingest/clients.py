@@ -175,10 +175,11 @@ class GitHubClient:
     def upsert_issue_summary(self, full_name: str, issue_number: int, marker: str, body: str) -> dict[str, Any]:
         owner, repo = full_name.split("/", 1)
         base = f"/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}"
-        viewer = self._request("GET", "/user")
-        login = viewer.get("login") if isinstance(viewer, dict) else None
-        if not isinstance(login, str) or not login:
-            raise IngestionError("GitHub returned no authenticated login")
+        installation = self._request("GET", "/installation")
+        app_slug = installation.get("app_slug") if isinstance(installation, dict) else None
+        if not isinstance(app_slug, str) or not app_slug:
+            raise IngestionError("GitHub returned no installation app identity")
+        login = f"{app_slug}[bot]"
         comments: list[dict[str, Any]] = []
         page = 1
         while True:

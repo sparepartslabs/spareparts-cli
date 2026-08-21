@@ -320,8 +320,8 @@ def test_github_writeback_updates_only_own_marked_comment():
     marker = writeback_marker("delivery-1")
     def transport(request):
         requests.append(request)
-        if request.full_url.endswith("/user"):
-            return 200, {"login": "github-actions[bot]"}
+        if request.full_url.endswith("/installation"):
+            return 200, {"app_slug": "github-actions"}
         if "/comments?" in request.full_url:
             return 200, [
                 {"id": 1, "body": marker, "user": {"login": "someone"}},
@@ -339,8 +339,8 @@ def test_github_writeback_creates_when_no_owned_marker_exists():
     requests = []
     def transport(request):
         requests.append(request)
-        if request.full_url.endswith("/user"):
-            return 200, {"login": "bot"}
+        if request.full_url.endswith("/installation"):
+            return 200, {"app_slug": "spare-parts"}
         if "/comments?" in request.full_url:
             return 200, []
         return 201, {"id": 3, "html_url": "https://example/3"}
