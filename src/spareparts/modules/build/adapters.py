@@ -27,7 +27,7 @@ def invoke(agent: str, model: str | None, prompt: str, checkout: Path, commands:
     if agent == "codex":
         if not os.environ.get("OPENAI_API_KEY") and not os.environ.get("CODEX_HOME"):
             raise BuildError("Codex needs OPENAI_API_KEY or an ephemeral CODEX_HOME")
-        argv = ["codex", "exec", "--full-auto", "--skip-git-repo-check"]
+        argv = ["codex", "exec", "--approve-for-me", "--sandbox", "workspace-write", "--skip-git-repo-check"]
         if model: argv += ["--model", model]
         argv += ["-"]
         environment = clean_environment("OPENAI_API_KEY")

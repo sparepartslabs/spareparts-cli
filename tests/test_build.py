@@ -151,7 +151,7 @@ def test_agent_adapters_are_normalized(monkeypatch, tmp_path):
     monkeypatch.setenv("SPAREPARTS_INGEST_KEY", "core-secret")
     assert invoke("codex", "gpt-x", "prompt", tmp_path, commands, 10) == "agent summary"
     argv, kwargs = commands.calls[-1]
-    assert argv == ["codex", "exec", "--full-auto", "--skip-git-repo-check", "--model", "gpt-x", "-"]
+    assert argv == ["codex", "exec", "--approve-for-me", "--sandbox", "workspace-write", "--skip-git-repo-check", "--model", "gpt-x", "-"]
     assert "secret" not in repr(argv) + repr(kwargs.get("input_text"))
     assert kwargs["env"]["OPENAI_API_KEY"] == "secret"
     assert "GITHUB_TOKEN" not in kwargs["env"] and "SPAREPARTS_INGEST_KEY" not in kwargs["env"]
