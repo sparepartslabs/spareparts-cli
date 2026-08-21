@@ -145,7 +145,8 @@ def ingest_issue(event: IssueEvent, provider: Any, github: Any, core: Any, *, re
     candidates=ontology["repositories"]
     try:
         search=core.search_ontology({"organization_login":event.organization,"query":issue_text,"limit":max_repositories,"component_limit":5,"stale_after_hours":24})
-        if isinstance(search.get("repositories"),list) and search["repositories"]: candidates=search["repositories"]
+        if isinstance(search.get("repositories"),list) and search["repositories"]:
+            candidates=validate_ontology({"revision_id":ontology["revision_id"],"complete":True,"repositories":search["repositories"]})["repositories"]
     except (IngestionError, AttributeError): pass
     try:
         raw = json.loads(provider.complete(routing_prompt(event, candidates), ROUTING_SCHEMA))
