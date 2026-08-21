@@ -111,10 +111,13 @@ class GitHubClient:
         return value
 
     def repositories(self, organization: str, limit: int) -> list[dict[str, Any]]:
-        values = self._get(f"/orgs/{urllib.parse.quote(organization)}/repos", {"per_page": limit, "sort": "full_name"})
+        payload = self._get("/installation/repositories", {"per_page": min(limit, 100)})
+        values = payload.get("repositories") if isinstance(payload, dict) else None
         if not isinstance(values, list):
-            raise IngestionError("GitHub repository response was not an array")
-        return [self._repository(repo) for repo in values[:limit]]
+            raise IngestionError("GitHub installation repository response was invalid")
+        owner = organization.casefold()
+        scoped = [repo for repo in values if isinstance(repo, dict) and str(repo.get("full_name") or "").partition("/")[0].casefold() == owner]
+        return [self._repository(repo) for repo in scoped[:limit]]
 
     def components(self, full_name: str, branch: str | None, *, max_components: int, max_requests: int, max_bytes: int) -> list[dict[str, Any]]:
         owner, repo = full_name.split("/", 1); base = f"/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}"
