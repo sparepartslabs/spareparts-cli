@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
@@ -128,16 +129,20 @@ def ingest_issue(event: IssueEvent, provider: Any, github: Any, core: Any, *, re
     ontology = None if refresh else core.current_ontology(event.organization, max_repositories)
     if ontology is None:
         observed_at = now()
+        catalog_started = time.perf_counter()
+        request_count_before = int(getattr(github, "request_count", 0))
         repositories = github.repositories(event.organization, max_repositories)
         for repository in repositories:
             try: repository["components"] = github.components(repository["name_with_owner"], repository.get("metadata",{}).get("default_branch"), max_components=max_components, max_requests=max_component_requests, max_bytes=max_component_bytes)
             except (IngestionError, AttributeError): repository["components"] = []
         identity = json.dumps(repositories, sort_keys=True, separators=(",", ":"))
         revision_id = "github:" + event.organization + ":" + hashlib.sha256(identity.encode()).hexdigest()
+        catalog_duration_ms = round((time.perf_counter() - catalog_started) * 1000)
         ontology = core.create_ontology({
             "revision_id": revision_id, "organization_id": event.organization_id,
             "organization_login": event.organization, "source": "github-rest", "observed_at": observed_at,
             "repositories": [{**repository, "observed_at": observed_at} for repository in repositories],
+            "refresh": {"started_at": observed_at, "component_count": sum(len(repository.get("components", [])) for repository in repositories), "github_request_count": max(0, int(getattr(github, "request_count", 0)) - request_count_before), "catalog_duration_ms": catalog_duration_ms},
         })
     ontology = validate_ontology(ontology)
     issue_text=f"{event.title}\n{event.body}"
