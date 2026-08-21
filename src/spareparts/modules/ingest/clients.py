@@ -178,11 +178,6 @@ class GitHubClient:
     def upsert_issue_summary(self, full_name: str, issue_number: int, marker: str, body: str) -> dict[str, Any]:
         owner, repo = full_name.split("/", 1)
         base = f"/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}"
-        installation = self._request("GET", "/installation")
-        app_slug = installation.get("app_slug") if isinstance(installation, dict) else None
-        if not isinstance(app_slug, str) or not app_slug:
-            raise IngestionError("GitHub returned no installation app identity")
-        login = f"{app_slug}[bot]"
         comments: list[dict[str, Any]] = []
         page = 1
         while True:
@@ -194,8 +189,9 @@ class GitHubClient:
                 break
             page += 1
         for comment in comments:
-            author = comment.get("user", {}).get("login") if isinstance(comment, dict) else None
-            if isinstance(author, str) and author.casefold() == login.casefold() and marker in str(comment.get("body", "")) and comment.get("id"):
+            author = comment.get("user") if isinstance(comment, dict) else None
+            author_type = author.get("type") if isinstance(author, dict) else None
+            if author_type == "Bot" and marker in str(comment.get("body", "")) and comment.get("id"):
                 value = self._request("PATCH", base + f"/issues/comments/{comment['id' ]}", {"body": body})
                 return {"action": "updated", "comment_id": value.get("id"), "url": value.get("html_url")}
         value = self._request("POST", base + f"/issues/{issue_number}/comments", {"body": body})
