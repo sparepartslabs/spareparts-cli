@@ -76,7 +76,7 @@ def test_release_workflow_is_anthropic_only_and_publishes_canonical_s3_markdown(
     assert "openai-api-key" not in source and "gemini-api-key" not in source
     assert 'write-repository: "false"' in source
     assert "id-token: write" in source
-    assert "uses: aws-actions/configure-aws-credentials@v5" in source
+    assert "uses: aws-actions/configure-aws-credentials@v6" in source
     assert "role-to-assume: ${{ vars.CHANGELOG_AWS_ROLE_ARN }}" in source
     assert "aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}" in source
     assert 'publish-s3: "true"' in source
