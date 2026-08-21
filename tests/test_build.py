@@ -7,7 +7,7 @@ import pytest
 
 from spareparts.cli import main
 from spareparts.modules.build.adapters import invoke
-from spareparts.modules.build.clients import CommandResult, Commands as SubprocessCommands, CoreClient
+from spareparts.modules.build.clients import CommandResult, Commands as SubprocessCommands, CoreClient, GitHub as GitHubClient
 from spareparts.modules.build.models import BuildError, Plan, Policy, Target, classify_changed_paths, safe_changed_paths
 from spareparts.modules.build.progress import HuddleMonitor, discover
 from spareparts.modules.build.service import PreparedTarget, _changed_paths, branch_for, marker, run_build, validate_plan
@@ -172,6 +172,29 @@ def test_claude_failure_uses_stdout_when_stderr_is_empty(monkeypatch, tmp_path):
         invoke("claude", None, "prompt", tmp_path, commands, 10)
 
 
+def test_github_status_flattens_paginated_comment_pages():
+    calls = []
+    marker = "<!-- managed -->"
+
+    def commands(argv, **kwargs):
+        calls.append(argv)
+        if argv[:2] == ["gh", "api"] and "--slurp" in argv:
+            return CommandResult(0, json.dumps([[{"id": 1, "body": "old"}], [{"id": 2, "body": marker}]]), "")
+        return CommandResult(0, "", "")
+
+    GitHubClient(commands, "token").publish_status("owner/source", 7, marker, "updated")
+    assert calls[0][-2:] == ["--paginate", "--slurp"]
+    assert calls[1][:5] == ["gh", "api", "--method", "PATCH", "repos/owner/source/issues/comments/2"]
+
+
+def test_github_status_rejects_non_page_slurp_output():
+    def commands(argv, **kwargs):
+        return CommandResult(0, json.dumps([{"id": 1, "body": "not wrapped"}]), "")
+
+    with pytest.raises(BuildError, match="comments were invalid"):
+        GitHubClient(commands, "token").publish_status("owner/source", 7, "marker", "body")
+
+
 def test_core_contract_uses_api_key_and_exact_routes():
     requests = []
     def transport(request):
@@ -204,6 +227,17 @@ def test_terminal_replay_does_not_clone_or_update(tmp_path):
     assert "sp:build-status" in github.statuses[0][2]
 
 
+def test_final_status_writeback_failure_preserves_successful_result(tmp_path):
+    class FailingStatusGitHub(GitHub):
+        def publish_status(self, repository, issue, marker, body):
+            raise BuildError("GitHub issue comments were invalid", "retryable_failure")
+
+    result = run_build(source_repository="sparepartslabs/distributor", issue_number=7, trigger_id="delivery", agent="codex", model=None, workspace=tmp_path, policy=policy(), core=Core(status="pr_opened"), github=FailingStatusGitHub(), commands=Commands())
+    assert result["status"] == "success"
+    assert result["targets"][0]["status"] == "pr_opened"
+    assert result["progress_warnings"] == ["Final issue status writeback failed."]
+
+
 def test_no_change_writes_terminal_state(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "secret")
     core = Core()
@@ -219,6 +253,8 @@ def test_valid_change_commits_pushes_and_opens_marker_pr(monkeypatch, tmp_path):
     target = result["targets"][0]
     assert target["status"] == "pr_opened" and target["pr_number"] == 9
     assert "<!-- sp:build " in github.published[0][4]
+    assert "[sparepartslabs/distributor#7](https://github.com/sparepartslabs/distributor/issues/7)" in github.published[0][4]
+    assert "`sparepartslabs/distributor#7`" not in github.published[0][4]
     assert ["git", "push", "--force-with-lease", "-u", "origin", branch_for(7, "attempt-1")] in [call[0] for call in commands.calls]
     assert core.updated[-1][1]["commit_sha"] == "commit-sha"
     assert any("https://github/pr/9" in status[3] for status in github.statuses)

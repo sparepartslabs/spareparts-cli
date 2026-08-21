@@ -236,7 +236,8 @@ def run_build(*, source_repository: str, issue_number: int, trigger_id: str, age
             commit = _git(commands, ["rev-parse", "HEAD"], item.checkout, github.git_env)
             _git(commands, ["push", "--force-with-lease", "-u", "origin", item.branch], item.checkout, github.git_env)
             tag = marker(source_repository, issue_number, plan.ingestion["id"], item.target.name_with_owner, item.attempt_id)
-            body = f"{tag}\n\nAddresses `{source_repository}#{issue_number}`.\n\nAgent: `{agent}`" + (f" / `{model}`" if model else "") + f"\n\nChanged paths: {', '.join(paths)}\n\nValidations: {json.dumps(validations, separators=(',', ':'))}"
+            source_issue_url = f"https://github.com/{source_repository}/issues/{issue_number}"
+            body = f"{tag}\n\nSource issue: [{source_repository}#{issue_number}]({source_issue_url}).\n\nAgent: `{agent}`" + (f" / `{model}`" if model else "") + f"\n\nChanged paths: {', '.join(paths)}\n\nValidations: {json.dumps(validations, separators=(',', ':'))}"
             pr = github.publish_pr(item.target.name_with_owner, item.branch, item.base, f"Address {source_repository}#{issue_number}", body)
             summary = (agent_summary or f"Changed {len(paths)} path(s).")[:1000]
             core.update_attempt(item.attempt_id, {"status": "pr_opened", "head_branch": item.branch, "commit_sha": commit, "pr_number": pr["number"], "pr_url": pr["url"], "summary": summary})
@@ -256,5 +257,8 @@ def run_build(*, source_repository: str, issue_number: int, trigger_id: str, age
         lines.append(detail)
     if monitor.warnings:
         lines += ["", "Progress warnings: " + "; ".join(monitor.warnings)[:500]]
-    github.publish_status(source_repository, issue_number, status_marker, "\n".join(lines))
+    try:
+        github.publish_status(source_repository, issue_number, status_marker, "\n".join(lines))
+    except BuildError:
+        monitor.warnings.append("Final issue status writeback failed.")
     return {"status": status, "ingestion_id": plan.ingestion["id"], "targets": results, "progress_warnings": monitor.warnings}
