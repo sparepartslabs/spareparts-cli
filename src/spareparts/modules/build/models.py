@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -23,6 +23,56 @@ def repository_name(value: Any, field: str) -> str:
     if not isinstance(value, str) or not _REPO.fullmatch(value):
         raise BuildError(f"{field} must be OWNER/REPOSITORY")
     return value
+
+
+@dataclass(frozen=True)
+class RepositoryScopeEntry:
+    repository: str
+    rationale: str
+
+
+@dataclass(frozen=True)
+class RepositoryScopeRequest:
+    repositories: tuple[RepositoryScopeEntry, ...]
+
+    @classmethod
+    def load(cls, path: Path, current: set[str], maximum: int = 10) -> "RepositoryScopeRequest | None":
+        if not path.exists():
+            return None
+        if not path.is_file() or path.is_symlink():
+            raise BuildError("repository scope request must be a regular file", "rejected")
+        try:
+            import json
+            raw = path.read_bytes()
+            if len(raw) > 65_536:
+                raise BuildError("repository scope request is too large", "rejected")
+            value = json.loads(raw)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise BuildError("repository scope request is invalid JSON", "rejected") from error
+        if not isinstance(value, dict) or set(value) != {"repositories"} or not isinstance(value["repositories"], list) or not value["repositories"]:
+            raise BuildError("repository scope request must contain repositories", "rejected")
+        entries: list[RepositoryScopeEntry] = []
+        seen: set[str] = set()
+        for item in value["repositories"]:
+            if not isinstance(item, dict) or set(item) != {"repository", "rationale"}:
+                raise BuildError("repository scope request entry is invalid", "rejected")
+            try:
+                repository = repository_name(item.get("repository"), "requested repository")
+            except BuildError as error:
+                raise BuildError(str(error), "rejected") from error
+            rationale = item.get("rationale")
+            if not isinstance(rationale, str) or not rationale.strip() or len(rationale.strip()) > 1000 or any(ord(character) < 32 for character in rationale.strip()):
+                raise BuildError("requested repository rationale is invalid", "rejected")
+            normalized = repository.lower()
+            if normalized in current:
+                raise BuildError(f"requested repository is already authorized: {repository}", "rejected")
+            if normalized in seen:
+                raise BuildError(f"duplicate requested repository: {repository}", "rejected")
+            seen.add(normalized)
+            entries.append(RepositoryScopeEntry(repository, rationale.strip()))
+        if len(current) + len(entries) > maximum:
+            raise BuildError(f"repository scope request exceeds maximum of {maximum}", "rejected")
+        return cls(tuple(entries))
 
 
 @dataclass(frozen=True)
