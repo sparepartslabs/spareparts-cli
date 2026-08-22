@@ -11,7 +11,7 @@ from typing import Any
 
 from .adapters import clean_environment, invoke
 from .clients import Commands, CoreClient, GitHub
-from .models import BuildError, Plan, Policy, Target, classify_changed_paths
+from .models import BuildError, Plan, Policy, RepositoryScopeRequest, Target, classify_changed_paths
 from .progress import HuddleMonitor, HuddleRow, HuddleSnapshot, discover
 
 TERMINAL = {"pr_opened", "no_change", "rejected", "retryable_failure", "permanent_failure"}
@@ -67,6 +67,7 @@ def workspace_prompt(plan: Plan, prepared: list[PreparedTarget], agent: str) -> 
         f"Use the installed workspace huddle command `{huddle_command}` to implement this request across every listed checkout. "
         "Create or resume exactly one workspace huddle, settle cross-repository contracts, and drive each repository through specify, plan, tasks, and implement. "
         "Update the huddle after every lifecycle transition and set its canonical Status to complete only after all target tasks and useful validations are complete. "
+        "If concrete evidence shows that a required repository is missing, stop implementation, set the huddle Status to blocked, and write exactly one workspace file at .sp/repository-scope-request.json with this shape: {\"repositories\":[{\"repository\":\"OWNER/REPOSITORY\",\"rationale\":\"bounded concrete evidence\"}]}. Request only missing repositories; do not request a repository already listed or guess without evidence. "
         "Keep specs, huddles, .sp state, and generated agent commands local. Do not commit, push, create pull requests, expose credentials, or modify .git/.github.\n"
         + json.dumps(payload, separators=(",", ":"))
     )
@@ -191,6 +192,7 @@ def run_build(*, source_repository: str, issue_number: int, trigger_id: str, age
     huddle_marker = progress_marker(source_repository, issue_number, trigger_id)
     monitor = HuddleMonitor(workspace, lambda body: github.publish_status(source_repository, issue_number, huddle_marker, body), huddle_marker, agent, model)
     agent_summary = ""
+    scope_request: RepositoryScopeRequest | None = None
     try:
         for item in prepared:
             core.update_attempt(item.attempt_id, {"status": "running", "head_branch": item.branch})
@@ -209,12 +211,24 @@ def run_build(*, source_repository: str, issue_number: int, trigger_id: str, age
                 agent_summary = invoke(agent, model, workspace_prompt(plan, prepared, agent), workspace, commands, policy.timeout)
             finally:
                 monitor.stop()
+            scope_request = RepositoryScopeRequest.load(
+                workspace / ".sp" / "repository-scope-request.json",
+                {item.target.name_with_owner.lower() for item in prepared},
+            )
+            if scope_request is not None:
+                raise BuildError("Additional repository scope is required.", "repository_scope_insufficient")
             snapshot = discover(workspace)
             _require_complete(snapshot, prepared)
     except BuildError as error:
         if monitor._thread and monitor._thread.is_alive():
             monitor.stop()
-        results.extend(_failure(core, prepared, error))
+        if error.category == "repository_scope_insufficient" and scope_request is not None:
+            for item in prepared:
+                body = {"status": "retryable_failure", "head_branch": item.branch, "summary": str(error), "failure_category": error.category}
+                core.update_attempt(item.attempt_id, body)
+                results.append({"attempt_id": item.attempt_id, "repository": item.target.name_with_owner, **body})
+        else:
+            results.extend(_failure(core, prepared, error))
         prepared = []
 
     for item in prepared:
@@ -245,7 +259,7 @@ def run_build(*, source_repository: str, issue_number: int, trigger_id: str, age
         except BuildError as error:
             results.extend(_failure(core, [item], error))
 
-    status = "success" if all(item["status"] in ("pr_opened", "no_change", "queued") for item in results) else "partial_failure"
+    status = "scope_expansion_requested" if scope_request is not None else ("success" if all(item["status"] in ("pr_opened", "no_change", "queued") for item in results) else "partial_failure")
     status_marker = f"<!-- sp:build-status source={source_repository} issue={issue_number} trigger={trigger_id} -->"
     lines = [status_marker, "", f"Build status: **{status}**", "", f"Agent: `{agent}`" + (f" / `{model}`" if model else ""), ""]
     for item in results:
@@ -261,4 +275,7 @@ def run_build(*, source_repository: str, issue_number: int, trigger_id: str, age
         github.publish_status(source_repository, issue_number, status_marker, "\n".join(lines))
     except BuildError:
         monitor.warnings.append("Final issue status writeback failed.")
-    return {"status": status, "ingestion_id": plan.ingestion["id"], "targets": results, "progress_warnings": monitor.warnings}
+    result: dict[str, Any] = {"status": status, "ingestion_id": plan.ingestion["id"], "targets": results, "progress_warnings": monitor.warnings}
+    if scope_request is not None:
+        result["scope_expansion"] = {"repositories": [{"repository": item.repository, "rationale": item.rationale} for item in scope_request.repositories]}
+    return result

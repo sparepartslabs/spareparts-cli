@@ -54,6 +54,12 @@ Safe tracked and untracked product files are published. Workspace huddles,
 `specs/`, `.sp/` state, and generated agent commands remain local and are never
 included in product commits. Publication fails closed when the huddle or its
 repository task lists are incomplete.
+If the coding agent finds concrete evidence that intake omitted a required
+repository, it marks the huddle blocked and writes a bounded local repository
+scope request. The build returns `scope_expansion_requested` and stops before
+publication. The trusted runner sends the validated request to Core, which may
+approve a newly scoped credential and schedule a fresh immutable job; a live
+job credential is never widened in place.
 Use `--dry-run` to validate Core/GitHub plan authorization without cloning or
 publishing. The runner container/platform must enforce non-root filesystem,
 resource, process, and egress isolation for trusted repositories.
